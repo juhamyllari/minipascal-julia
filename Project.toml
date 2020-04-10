@@ -1,0 +1,13 @@
+name = "MiniPascal"
+uuid = "3449e670-2bf4-4c21-b424-51b1e27c6c3d"
+authors = ["Juha Myllari <jmyllari@gmail.com>"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
