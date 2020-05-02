@@ -1,0 +1,10 @@
+var x:bool := true;
+var y:bool := false;
+
+print "true and false is ";
+print true & false;
+print "\ntrue and true is ";
+print true & true;
+print "\n";
+print "Can we assign boolean literals? ";
+print x;

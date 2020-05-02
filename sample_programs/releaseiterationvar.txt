@@ -1,0 +1,8 @@
+/*  Demonstrate that iteration variables can be assigned to
+    upon completion of the for loop. */
+for x in 1..3 do
+  print x;
+  print "\n";
+end for;
+x := x+100;
+print x;

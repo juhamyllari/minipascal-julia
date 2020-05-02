@@ -1,0 +1,9 @@
+/*  Demonstrate for loops, multiline and
+    single line comments, escape sequences
+    and range endpoint evaluation. */
+var x : int := 3;
+for i in (10-9)..x do
+  print "hello world\t";
+  print i;  // How many times?
+  print " times!\n";
+end for;

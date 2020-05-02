@@ -1,0 +1,13 @@
+var i:int;
+var j:bool;
+for i in 1..5 do
+  for j in 1..2 do
+    print "i is ";
+    print i;
+    print ", j is ";
+    print j;
+    print ", i * j is ";
+    print i*j;
+    print ".\n";
+  end for;
+end for;
