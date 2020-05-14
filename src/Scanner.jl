@@ -3,7 +3,7 @@ struct LexicalException <: Exception
 end
 
 @enum TokenClass begin
-  ident
+  identifier
   times
   plus
   minus
@@ -56,6 +56,7 @@ end
   kw_real
   kw_string
   kw_bool
+  kw_nothing
   kw_assert
   kw_true
   kw_false
@@ -89,7 +90,7 @@ keywords = Dict([
   "of" => kw_of,
   "size" => kw_size,
   "int" => kw_int,
-  "int" => kw_real,
+  "real" => kw_real,
   "string" => kw_string,
   "bool" => kw_bool,
   "assert" => kw_assert,
@@ -99,7 +100,7 @@ keywords = Dict([
   "or" => kw_or,
   "not" => kw_not
   ])
-symbol_initials = ['*', '+', '-', '/', '(', ')', '[', ']', '.', ';', ':', '!', '=', '<', '>', '&', '%'] 
+symbol_initials = ['*', '+', '-', '/', '(', ')', '[', ']', '.', ',', ';', ':', '!', '=', '<', '>', '&', '%'] 
 digits = '0':'9'
 unary_ops = Dict(
 #   log_not => '!'
@@ -135,15 +136,22 @@ end
 
 Token(class::TokenClass, lexeme::String) = Token(class, lexeme, 0)
 
+function getfirst(predicate, iterable)
+  for item in iterable
+    predicate(item) && return item
+  end
+  return nothing
+end
+
 """
 The main function of the scanner. The "next" index points at the
 character to scan next. The outer while loop skips whitespace, keeps
 track of the line number and the comment nesting level, calls the
 getToken function, stores the resulting tokens and increments the index.
 """
-function scanInput(input::AbstractString, next = 1)
+function scan_input(input::AbstractString, next = 1)
   input *= end_of_input_symbol
-  tokens = Array{Token,1}()
+  tokens = Vector{Token}()
   lineNumber = 1
   while next <= length(input)
     commentNesting = 0
@@ -189,7 +197,7 @@ function getToken(input, next, lineNumber)
     return getOperator(input, next, lineNumber)
   end
   if c ∈ digits
-    return getInteger(input, next, lineNumber)
+    return getNumber(input, next, lineNumber)
   end
   if c == '"'
     return getString(input, next, lineNumber)
@@ -203,9 +211,9 @@ end
 
 function getIdentOrKw(input, next, lineNumber)
   initial = next
-  while input[next] ∉ union(delimiters, symbol_initials) next += 1 end
+  while input[next] ∈ ident_or_kw_body next += 1 end
   str = input[initial:next-1]
-  token = str ∈ keys(keywords) ? Token(keywords[str], str) : Token(ident, str)
+  token = str ∈ keys(keywords) ? Token(keywords[str], str) : Token(identifier, str)
   return token, next
 end
 
@@ -232,16 +240,46 @@ function getOperator(input, next, lineNumber)
   return Token(tokenClass, string(input[next])), next+1
 end
 
-function getInteger(input, next, lineNumber)
+function getNumber(input, next, lineNumber)
+  initial = next
+  integer_block, next = get_number_block(input, next)
+  println("int block is $(integer_block), next points to $(input[next])")
+  if input[next] == '.'
+    next += 1
+    decimal_block, next = get_number_block(input, next)
+    println("dec block is $(decimal_block), next points to $(input[next])")
+    if input[next] ∈ ['e','E']
+      next += 1
+      sign = '+'
+      if input[next] ∈ ['+','-']
+        sign = input[next]
+        next += 1
+      end
+      exp_block, next = get_number_block(input, next)
+      return Token(real_literal, integer_block * '.' * decimal_block * 'e' * sign * exp_block), next
+    end
+    return Token(real_literal, integer_block * '.' * decimal_block), next
+  end
+  return Token(int_literal, integer_block), next
+end
+
+function get_number_block(input, next)
   initial = next
   while input[next] ∈ digits next += 1 end
-  return Token(int_literal, input[initial:next-1]), next
+  return input[initial:next-1], next
 end
+
+# function getNumber(input, next, lineNumber)
+#   initial = next
+#   while input[next] ∈ digits next += 1 end
+#   return Token(int_literal, input[initial:next-1]), next
+# end
+
 
 function getString(input, next, lineNumber)
   initial = next
   next += 1
-  str = Array{Char,1}()
+  str = Vector{Char}()
   while (input[next] != '"' ||
     (input[next] == '"' && input[next-1] == '\\'))
     if input[next] == '\\'

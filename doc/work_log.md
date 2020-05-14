@@ -7,7 +7,16 @@
 23.4. 1h  Parsing
 25.4. 2h  Parsing
 26.4. 4h  Parsing
-1.4.  1h  Static checking
-2.4.  2h  Static checking
+1.5.  1h  Static checking
+2.5.  2h  Static checking
+4.5.  .5h Parsing, static checking
+7.5.  2h  Variables, scoping etc.
+8.5.  1h  Variables, scoping etc.
+9.5.  2h  Variables, scoping etc.
+10.5. 2h  Functions, procedures
+11.5. 2h  Static checking
+12.5. 3h  Code generation for integers
+13.5. 4h  Code generation
+14.5. ?h  Variables, functions
 
 TOTAL ?h

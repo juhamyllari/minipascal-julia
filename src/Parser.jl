@@ -9,70 +9,118 @@ end
   MReal
   MBool
   MString
+  MIntRef
+  MRealRef
+  MBoolRef
+  MStringRef
+  MNothing
   MError
   MPassed
   MUndefined
 end
 
+token_class_to_nonref_type = Dict(
+  kw_int => MInt,
+  kw_real => MReal,
+  kw_bool => MBool,
+  kw_string => MString
+)
+
+token_class_to_ref_type = Dict(
+  kw_int => MIntRef,
+  kw_real => MRealRef,
+  kw_bool => MBoolRef,
+  kw_string => MStringRef
+)
+
 abstract type Node end
 abstract type Statement <: Node end
 abstract type Value <: Node end
-abstract type VarType <: Node end
-abstract type Definition <: Node end
 abstract type Factor <: Value end
 
+mutable struct ImmediateInt <: Value
+  value::Int
+  type::MPType
+  ImmediateInt(value) = new(value, MUndefined)
+end
+
+mutable struct ImmediateReal <: Value
+  value::Float64
+  type::MPType
+  ImmediateReal(value) = new(value, MUndefined)
+end
+
+mutable struct ImmediateString <: Value
+  value::String
+  type::MPType
+  ImmediateString(value) = new(value, MUndefined)
+end
+
+mutable struct ImmediateBool <: Value
+  value::Bool
+  type::MPType
+  ImmediateBool(value) = new(value, MUndefined)
+end
+
 mutable struct Block <: Node
-  statements::Array{Statement,1}
+  statements::Vector{Statement}
   line::Int
   type::MPType
+  Block(statements, line) = new(statements, line, MUndefined)
 end
 
-mutable struct SimpleType <: VarType
-  vartype::Token
-  line::Int
-  type::MPType
-end
+# mutable struct SimpleType <: VarType
+#   vartype::MPType
+#   line::Int
+#   type::MPType
+#   SimpleType(vartype, line) = new(vartype, line, MUndefined)
+# end
 
-mutable struct ArrayType <: VarType
-  vartype::Token
-  length::Value
+# mutable struct ArrayType <: VarType
+#   vartype::MPType
+#   length::Value
+#   line::Int
+#   ArrayType(vartype, length, line) = new(vartype, length, line, MUndefined)
+# end
+
+mutable struct VarType <: Node
+  var_type::MPType
+  size::Value
   line::Int
   type::MPType
+  VarType(var_type, size, line) = new(var_type, size, line, MUndefined) 
 end
 
 mutable struct Parameter <: Node
-  name::Token
-  isvar::Bool
-  vartype::VarType
+  name::String
+  var_type::MPType
+  size::Value
+  is_ref::Bool
   line::Int
   type::MPType
+  Parameter(name, var_type, size, is_ref, line) = new(name, var_type, size, is_ref, line, MUndefined)
 end
 
 mutable struct Parameters <: Node
-  params::Array{Parameter,1}
+  params::Vector{Parameter}
   line::Int
   type::MPType
+  Parameters(params, line) = new(params, line, MUndefined)
 end
 
-mutable struct Procedure <: Definition
-  name::Token
-  params::Parameters
-  body::Block
-  line::Int
-  type::MPType
-end
-
-mutable struct Func <: Definition
+# Function or procedure.
+mutable struct Subroutine <: Node
   name::Token
   params::Parameters
   ret_type::VarType
   body::Block
   line::Int
   type::MPType
+  Subroutine(name, params, ret_type, body, line) = new(name, params, ret_type, body, line, MUndefined) 
 end
 
 mutable struct Definitions <: Node
-  defs::Array{Definition,1}
+  defs::Vector{Subroutine}
   line::Int
   type::MPType
   Definitions(defs, line) = new(defs, line, MUndefined)
@@ -87,7 +135,7 @@ mutable struct Program <: Node
 end
 
 mutable struct Arguments <: Node
-  arguments::Array{Value,1}
+  arguments::Vector{Value}
   line::Int
   type::MPType
   Arguments(arguments, line) = new(arguments, line, MUndefined)
@@ -98,15 +146,15 @@ mutable struct CallStatement <: Statement
   arguments::Arguments
   line::Int
   type::MPType
-  Definitions(ident, arguments, line) = new(ident, arguments, line, MUndefined)
+  CallStatement(ident, arguments, line) = new(ident, arguments, line, MUndefined)
 end
 
 mutable struct Declaration <: Statement
-  names::Array{Token,1}
-  vartype::VarType
+  names::Vector{Token}
+  var_type::VarType
   line::Int
   type::MPType
-  Declaration(names, vartype, line) = new(names, vartype, line, MUndefined)
+  Declaration(names, var_type, line) = new(names, var_type, line, MUndefined)
 end
 
 mutable struct Assignment <: Statement
@@ -114,6 +162,7 @@ mutable struct Assignment <: Statement
   value::Value
   line::Int
   type::MPType
+  Assignment(variable, value, line) = new(variable, value, line, MUndefined)
 end
 
 mutable struct If <: Statement
@@ -151,7 +200,7 @@ mutable struct Return <: Statement
 end
 
 mutable struct Term <: Value
-  factors::Array{Tuple{Factor,TokenClass},1}
+  factors::Array{Tuple{Factor,Token},1}
   line::Int
   type::MPType
   Term(factors, line) = new(factors, line, MUndefined)
@@ -175,61 +224,54 @@ mutable struct RelationalExpression <: Value
 end
 
 mutable struct SizeFactor <: Factor
-  factor::Factor
+  array::Factor
   line::Int
   type::MPType
+  SizeFactor(array, line) = new(array, line, MUndefined)
 end
 
 mutable struct NotFactor <: Factor
-  factor::Factor
+  argument::Factor
   line::Int
   type::MPType
+  NotFactor(argument, line) = new(argument, line, MUndefined)
 end
 
 mutable struct ParenFactor <: Factor
-  factor::Factor
+  expression::Value
   line::Int
   type::MPType
+  ParenFactor(expression, line) = new(expression, line, MUndefined)
 end
 
-mutable struct Literal <: Factor
+mutable struct LiteralFactor <: Factor
   token::Token
   line::Int
   type::MPType
-  Literal(token, line) = new(token, line, MUndefined)
+  LiteralFactor(token, line) = new(token, line, MUndefined)
 end
 
-mutable struct Operator <: Node
-  token::Token
+mutable struct VariableFactor <: Factor
+  identifier::Token
   line::Int
   type::MPType
+  VariableFactor(identifier, line) = new(identifier, line, MUndefined)
 end
 
-mutable struct BinaryOperation <: Value
-  leftOperand::Value
-  operator::Token
-  rightOperand::Value
+mutable struct ArrayAccessFactor <: Factor
+  identifier::Token
+  index::Expr
   line::Int
   type::MPType
+  ArrayAccessFactor(identifier, index, line) = new(identifier, index, line, MUndefined)
 end
 
-mutable struct UnaryOperation <: Value
-  operator::Token
-  operand::Value
+mutable struct CallFactor <: Factor
+  identifier::Token
+  arguments::Arguments
   line::Int
   type::MPType
-end
-
-mutable struct Var <: Value
-  variable::Token
-  line::Int
-  type::MPType
-end
-
-mutable struct LeftVal <: Node
-  token::Token
-  line::Int
-  type::MPType
+  CallFactor(identifier, arguments, line) = new(identifier, arguments, line, MUndefined)
 end
 
 relational_operators = [
@@ -257,455 +299,62 @@ mult_operators = [
 literals = [
   int_literal,
   string_literal,
-  real_literal
+  real_literal,
+  kw_true,
+  kw_false
 ]
+
+mutable struct InputCounter
+  tokens::Vector{Token}
+  index::Int
+  InputCounter(tokens) = new(tokens, 1)
+end
+
+function next_token(ic::InputCounter)
+  if ic.index > length(ic.tokens)
+    throw(SyntaxException(
+      "Failed to parse program. Do all your statements have a terminating semicolon?"))
+  end
+  return ic.tokens[ic.index]
+end
+
+nextclass(ic::InputCounter) = next_token(ic::InputCounter).class
+
+# Convenience function. Returns the token, its class and its line number.
+function token_class_line(ic::InputCounter)
+  token = next_token(ic::InputCounter)
+  return token, token.class, token.line
+end
+
+"""
+Consumes the next token, checking that the token class matches.
+"""
+function match_term(terminal::TokenClass, ic::InputCounter, current_unit::String)
+  DEBUG && println("match_term called in $(current_unit) with terminal $(terminal), next is $(nextclass(ic))")
+  token, class, line = token_class_line(ic)
+  does_match = terminal == class
+  if !does_match
+    if terminal == semicolon && class == eoi
+      throw(SyntaxException(
+        "Unexpected end of input. Did you forget a semicolon?"))
+    elseif terminal == identifier && class ∈ values(keywords)
+      throw(SyntaxException(
+        "Expected a variable identifier but got keyword \"$(token.lexeme)\" on line $(line)."))
+    else
+      throw(SyntaxException(
+        "Failed to parse $(current_unit) on or around line $(line)."))
+    end
+  end
+  ic.index += 1
+  return does_match
+end
 
 """
 The main function of the parser. Maintains an index ("next") to point
 at the token to be processed next. Builds the AST by calling mutually
 recursive parsing functions, starting with statements().
 """
-function parseInput(input::Array{Token,1})
-  
-  # Gets the next token.
-  function nxtok()
-    if next > length(input)
-      throw(SyntaxException(
-        "Failed to parse program. Do all your statements have a terminating semicolon?"))
-    end
-    return input[next]
-  end
-
-  nxtclass() = nxtok().class
-
-  # Convenience function. Returns the token, its class and its line number.
-  function tok_class_line()
-    tok = nxtok()
-    return tok, tok.class, tok.line
-  end
-
-  """
-  Consumes the next token, checking that the token class matches.
-  """
-  function match_term(terminal::TokenClass)
-    DEBUG && println("match_term called in $(currentUnit) with terminal $(terminal), next is $(nxtclass())")
-    token, class, line = tok_class_line()
-    does_match = terminal == class
-    if !does_match
-      if terminal == semicolon && class == eoi
-        throw(SyntaxException(
-          "Unexpected end of input. Did you forget a semicolon?"))
-      elseif terminal == ident && class ∈ values(keywords)
-        throw(SyntaxException(
-          "Expected a variable identifier but got keyword \"$(token.lexeme)\" on line $(line)."))
-      else
-        throw(SyntaxException(
-          "Failed to parse $(currentUnit) on or around line $(line)."))
-      end
-    end
-    next += 1
-    return does_match
-  end
-  
-  function program()
-    currentUnit = "program"
-    DEBUG && println("this is program, nxtclass is ", nxtclass())
-    match_term(kw_program)
-    match_term(ident)
-    match_term(semicolon)
-    token, class, line = tok_class_line()
-    defs = Definitions(Array{Definition,1}(), line)
-    if class ∈ [kw_function, kw_procedure]
-      defs = definitions()
-    end
-    main = block()
-    match_term(dot)
-    return Program(defs, main, line)
-  end
-
-  function procedure()
-    currentUnit = "procedure"
-    token, class, line = tok_class_line()
-    match_term(kw_procedure)
-    name = nxtok()
-    match_term(ident)
-    match_term(open_paren)
-    params = parameters()
-    match_term(close_paren)
-    match_term(semicolon)
-    body = block()
-    match_term(semicolon)
-    return Procedure(name, params, body, line)
-  end
-
-  function function_mp()
-    currentUnit = "function"
-    token, class, line = tok_class_line()
-    match_term(kw_function)
-    name = nxtok()
-    match_term(ident)
-    match_term(open_paren)
-    params = parameters()
-    match_term(close_paren)
-    match_term(colon)
-    ret_type = var_type()
-    match_term(semicolon)
-    body = block()
-    match_term(semicolon)
-    return Func(name, params, ret_type, body, line)
-  end
-
-  function parameters()
-    currentUnit = "parameters"
-    token, class, line = tok_class_line()
-    params = Array{Parameter,1}()
-    while nxtclass() != close_paren
-      push!(params, parameter())
-      if nxtclass() == comma
-        match_term(comma)
-        if nxtclass() == close_paren
-          throw(SyntaxException(
-            "A parameter list on line $(line) ends in a comma."
-          ))
-        end
-      end
-    end
-    return Parameters(params, line)
-  end
-
-  function parameter()
-    currentUnit = "parameter"
-    token, class, line = tok_class_line()
-    isvar = (class == kw_var)
-    isvar && match_term(kw_var)
-    name = nxtok()
-    match_term(ident)
-    match_term(colon)
-    v_type = var_type()
-    return Parameter(name, isvar, v_type, line)
-  end
-
-  function definitions()
-    currentUnit = "definitions"
-    token, class, line = tok_class_line()
-    defs = Array{Definition,1}()
-    while nxtclass() ∈ [kw_procedure, kw_function]
-      def = (nxtclass() == kw_procedure ? procedure() : func())
-      push!(defs, def)
-    end
-    return Definitions(defs, line)
-  end
-
-  function block()
-    currentUnit = "block"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is block, nxtclass is ", class)
-    match_term(kw_begin)
-    stmts = Array{Node,1}()
-    while nxtclass() != kw_end
-      push!(stmts, statement())
-      if nxtclass() == semicolon
-        match_term(semicolon)
-      end
-    end
-    match_term(kw_end)
-    return Block(stmts, line)
-  end
-
-  # function statements()
-  #   currentUnit = "group of statements"
-  #   token, class, line = tok_class_line()
-  #   DEBUG && println("this is statements, nxtype is ", class)
-  #   stmts = Array{Node,1}()
-  #   while nxtclass() ∉ [eoi, kw_end]
-  #     push!(stmts, statement())
-  #     match_term(semicolon)
-  #   end
-  #   return Statements(stmts, line)
-  # end
-
-  function statement()
-    currentUnit = "statement"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is statement, nxtclass is ", class)
-    if class == kw_var
-      return var_declaration()
-    end
-    if class == kw_begin
-      return block()
-    end
-    if class == kw_if
-      return if_statement()
-    end
-    if class == kw_while
-      return while_statement()
-    end
-    return simple_statement()
-  end
-
-  function var_declaration()
-    currentUnit = "declaration"
-    token, class, line = tok_class_line()
-    match_term(kw_var)
-    names = Array{String,1}()
-    while nxtclass() != colon
-      push!(names, nxtok())
-      match_term(ident)
-      if nxtclass() == comma
-        match_term(comma)
-        if nxtclass() == colon
-          throw(SyntaxException(
-            "Did not expect comma before colon in declaration on line $(line)."
-          ))
-        end
-      end
-    end
-    v_type = var_type()
-    return Declaration(names, v_type, line)
-  end
-
-  function simple_statement()
-    currentUnit = "simple statement"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is simple statement, nxtclass is ", class)
-    if class == kw_return
-      return return_statement()
-    end
-    if class == kw_read
-      return read_statement()
-    end
-    if class == kw_writeln
-      return write_statement()
-    end
-    if class == kw_assert
-      return assert_statement()
-    end
-    if class == ident
-      # The statement is a call or an assignment.
-      # Disambiguate by using lookahead.
-      if input[next+1].class == open_paren
-        call_statement()
-      end
-      if input[next+1].class ∈ [assign, open_sqr_bracket]
-        assignment()
-      end
-    end
-    throw(SyntaxException(
-      "Failed to parse statement on line $(line).")
-    )
-  end
-
-  function return_statement()
-    currentUnit = "return statement"
-    token, class, line = tok_class_line()
-    match_term(kw_return)
-    if nxtclass() ∈ [semicolon, kw_end]
-      return Return(Nothing, line)
-    end
-    return Return(expr(), line)
-  end
-
-  function assignment()
-    currentUnit = "assignment"
-    token, class, line = tok_class_line()
-    match_term(ident)
-    match_term(assign)
-    value = expr()
-    return Assignment(token, value, line)
-  end
-
-  # A function or procedure call as a statement.
-  # The return value is discarded.
-  function call_statement()
-    currentUnit = "call statement"
-    token, class, line = tok_class_line()
-    match_term(ident)
-    match_term(open_paren)
-    args = arguments()
-    match_term(close_paren)
-    return CallStatement(token, args, line)
-  end
-  
-  function write_statement()
-    currentUnit = "write statement"
-    token, class, line = tok_class_line()
-    match_term(kw_writeln)
-    return Write(arguments(), line)
-  end
-
-  function arguments()
-    currentUnit = "arguments"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is arguments, nxtclass is ", class)
-    args = Array{Value,1}()
-    while nxtclass() ∉ [close_paren, semicolon]
-      push!(args, expr())
-      nxtclass() == comma && match_term(comma)
-    end
-    return Arguments(args, line)
-  end
-
-  function expr()
-    currentUnit = "expression"
-    token, class, line = tok_class_line()
-    left_simple = simple_expr()
-    token, class, line = tok_class_line()
-    if class ∈ relational_operators
-      right_simple = simple_expr()
-      return RelationalExpression(left_simple, right_simple, token, line)
-    end
-    return left_simple
-  end
-
-  function simple_expr()
-    currentUnit = "simple expression"
-    token, class, line = tok_class_line()
-    sign = Token(plus, "+", line)
-    if class ∈ [plus, minus]
-      sign = class
-      match_term(class)
-    end
-    terms = Array{Tuple{Term,Token},1}()
-    first_term = term()
-    push!(terms, (first_term, sign))
-    while nxtclass() ∈ adding_operators
-      operation = nxtok()
-      match_term(operation.class)
-      new_term = term()
-      push!(terms, (new_term, operation))
-    end
-    return SimpleExpression(terms, line)
-  end
-
-  function term()
-    currentUnit = "term"
-    token, class, line = tok_class_line()
-    factors = Array{Tuple{Factor,TokenClass},1}()
-    first_factor = factor()
-    push!(factors, (first_factor, identity_op))
-    while nxtclass() ∈ mult_operators
-      operator = nxtclass()
-      match_term(operator)
-      push!(factors, (factor(), operator))
-    end
-    return Term(factors, line)
-  end
-
-  function factor()
-    currentUnit = "term"
-    token, class, line = tok_class_line()
-    fact = Nothing
-    if class == open_paren
-      fact = paren_factor()
-    elseif class == kw_not
-      fact = not_factor()
-    elseif class ∈ literals
-      fact = literal_factor()
-    elseif class == ident
-      # The factor is a call or a variable.
-      # Disambiguate by using lookahead.
-      if input[next+1].class == open_paren
-        fact = call_factor()
-      else
-        fact = variable_factor()
-      end
-    end
-    token, class, line = tok_class_line()
-    if class == dot
-      match_term(dot)
-      match_term(kw_size)
-      return SizeFactor(fact, line)
-    end
-    return fact
-  end
-
-  function not_factor()
-    token, class, line = tok_class_line()
-    match_term(kw_not)
-    return NotFactor(factor(), line)
-  end
-
-  function literal_factor()
-    token, class, line = tok_class_line()
-    match_term(class)
-    return Literal(token, line)
-  end
-
-  function paren_factor()
-    token, class, line = tok_class_line()
-    match_term(open_paren)
-    fact = factor()
-    match_term(close_paren)
-    return ParenFactor(fact, line)
-  end
-
-  function var_type()
-    currentUnit = "type"
-    token, class, line = tok_class_line()
-    if class == kw_array
-      match_term(kw_array)
-      match_term(open_sqr_bracket)
-      len = expr()
-      match_term(close_sqr_bracket)
-      match_term(kw_of)
-      s_type = nxtok()
-      match_term(ident)
-      return ArrayType(SimpleType(s_type), len, line)
-    end
-    return SimpleType(token, line)
-  end
-
-  function unary_op()
-    currentUnit = "unary operation"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is unary_op, nxtclass is ", class)
-    match_term(class)
-    return Operator(token, line)
-  end
-
-  function operand()
-    currentUnit = "operand"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is operand, nxtclass is ", class)
-    if class == open_paren
-      match_term(open_paren)
-      expression = expr()
-      match_term(close_paren)
-      return expression
-    end
-    if class == ident
-      match_term(class)
-      return Var(token, line)
-    end
-    if class ∈ [int_literal, string_literal, kw_true, kw_false]
-      match_term(class)
-      return Literal(token, line)
-    end
-    throw(SyntaxException(
-      "Expected an operand on line $(line), got '$(token.lexeme)'."
-    ))
-  end
-
-  function operator()
-    currentUnit = "operator"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is operator, nxtclass is ", class)
-    if class ∈ keys(binary_ops)
-      match_term(class)
-      return Operator(token, line)
-    end
-    throw(SyntaxException(
-      "Expected a binary operator on line $(line), got '$(token.lexeme)'."
-    ))
-  end
-
-  function leftval_ident()
-    currentUnit = "identifier"
-    token, class, line = tok_class_line()
-    DEBUG && println("this is leftval_ident, nxtclass is ", class)
-    match_term(ident)
-    return LeftVal(token, line)
-  end
+function parse_input(input::Vector{Token})
 
   if length(input) < 2
     throw(SyntaxException(
@@ -713,9 +362,394 @@ function parseInput(input::Array{Token,1})
     ))
   end
   
-  next = 1
-  currentUnit = "program"
-  program()
+  ic = InputCounter(input)
+
+  program(ic)
+  
 end
 
-parseInput(source::String) = parseInput(scanInput(source))
+function program(ic::InputCounter)
+  current_unit = "program"
+  DEBUG && println("this is $(current_unit), next is ", next_token(ic))
+  match_term(kw_program, ic, current_unit)
+  match_term(identifier, ic, current_unit)
+  match_term(semicolon, ic, current_unit)
+  token, class, line = token_class_line(ic)
+  defs = Definitions(Vector{Subroutine}(), line)
+  if class ∈ [kw_function, kw_procedure]
+    defs = definitions(ic)
+  end
+  main = block(ic)
+  match_term(dot, ic, current_unit)
+  return Program(defs, main, line)
+end
+
+function procedure(ic::InputCounter)
+  current_unit = "procedure"
+  token, class, line = token_class_line(ic)
+  match_term(kw_procedure, ic, current_unit)
+  name = next_token(ic)
+  match_term(identifier, ic, current_unit)
+  match_term(open_paren, ic, current_unit)
+  params = parameters(ic)
+  match_term(close_paren, ic, current_unit)
+  match_term(semicolon, ic, current_unit)
+  body = block(ic)
+  match_term(semicolon, ic, current_unit)
+  return_type = SimpleType(Token(kw_nothing, "", line), line)
+  return Subroutine(name, params, return_type, body, line)
+end
+
+function func(ic::InputCounter)
+  current_unit = "function"
+  token, class, line = token_class_line(ic)
+  match_term(kw_function, ic, current_unit)
+  name = next_token(ic)
+  match_term(identifier, ic, current_unit)
+  match_term(open_paren, ic, current_unit)
+  params = parameters(ic)
+  match_term(close_paren, ic, current_unit)
+  match_term(colon, ic, current_unit)
+  ret_type = var_type(ic)
+  match_term(semicolon, ic, current_unit)
+  body = block(ic)
+  match_term(semicolon, ic, current_unit)
+  return Subroutine(name, params, ret_type, body, line)
+end
+
+function parameters(ic::InputCounter)
+  current_unit = "parameters"
+  token, class, line = token_class_line(ic)
+  params = Vector{Parameter}()
+  while nextclass(ic) != close_paren
+    push!(params, parameter(ic))
+    if nextclass(ic) == comma
+      match_term(comma, ic, current_unit)
+      if nextclass(ic) == close_paren
+        throw(SyntaxException(
+          "A parameter list on line $(line) ends in a comma."
+        ))
+      end
+    end
+  end
+  return Parameters(params, line)
+end
+
+function parameter(ic::InputCounter)
+  current_unit = "parameter"
+  token, class, line = token_class_line(ic)
+  is_ref = (class == kw_var)
+  is_ref && match_term(kw_var, ic, current_unit)
+  name = next_token(ic)
+  match_term(identifier, ic, current_unit)
+  match_term(colon, ic, current_unit)
+  v_type::VarType = var_type(ic)
+  return Parameter(name.lexeme, v_type.var_type, v_type.size, is_ref, line)
+end
+
+function definitions(ic::InputCounter)
+  current_unit = "definitions"
+  token, class, line = token_class_line(ic)
+  defs = Vector{Subroutine}()
+  while nextclass(ic) ∈ [kw_procedure, kw_function]
+    def = (nextclass(ic) == kw_procedure ? procedure(ic) : func(ic))
+    push!(defs, def)
+  end
+  return Definitions(defs, line)
+end
+
+function block(ic::InputCounter)
+  current_unit = "block"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  match_term(kw_begin, ic, current_unit)
+  stmts = Vector{Node}()
+  while nextclass(ic) != kw_end
+    push!(stmts, statement(ic))
+    if nextclass(ic) == semicolon
+      match_term(semicolon, ic, current_unit)
+    end
+  end
+  match_term(kw_end, ic, current_unit)
+  return Block(stmts, line)
+end
+
+function statement(ic::InputCounter)
+  current_unit = "statement"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  if class == kw_var
+    return var_declaration(ic)
+  end
+  if class == kw_begin
+    return block(ic)
+  end
+  if class == kw_if
+    return if_statement(ic)
+  end
+  if class == kw_while
+    return while_statement(ic)
+  end
+  return simple_statement(ic)
+end
+
+function var_declaration(ic::InputCounter)
+  current_unit = "var_declaration"
+  token, class, line = token_class_line(ic)
+  match_term(kw_var, ic, current_unit)
+  names = Vector{Token}()
+  while nextclass(ic) != colon
+    push!(names, next_token(ic))
+    match_term(identifier, ic, current_unit)
+    if nextclass(ic) == comma
+      match_term(comma, ic, current_unit)
+      if nextclass(ic) == colon
+        throw(SyntaxException(
+          "Did not expect comma before colon in declaration on line $(line)."
+        ))
+      end
+    end
+  end
+  match_term(colon, ic, current_unit)
+  v_type = var_type(ic)
+  return Declaration(names, v_type, line)
+end
+
+function simple_statement(ic::InputCounter)
+  current_unit = "simple statement"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  if class == kw_return
+    return return_statement(ic)
+  end
+  if class == kw_read
+    return read_statement(ic)
+  end
+  if class == kw_writeln
+    return write_statement(ic)
+  end
+  if class == kw_assert
+    return assert_statement(ic)
+  end
+  if class == identifier
+    # The statement is a call or an assignment.
+    # Disambiguate by using lookahead.
+    if ic.tokens[ic.index+1].class == open_paren
+      return call_statement(ic)
+    end
+    if ic.tokens[ic.index+1].class ∈ [assign, open_sqr_bracket]
+      return assignment(ic)
+    end
+  end
+  throw(SyntaxException(
+    "Failed to parse statement on line $(line).")
+  )
+end
+
+function return_statement(ic::InputCounter)
+  current_unit = "return statement"
+  token, class, line = token_class_line(ic)
+  match_term(kw_return, ic, current_unit)
+  if nextclass(ic) ∈ [semicolon, kw_end]
+    return Return(Nothing, line)
+  end
+  return Return(expr(ic), line)
+end
+
+function assignment(ic::InputCounter)
+  current_unit = "assignment"
+  token, class, line = token_class_line(ic)
+  match_term(identifier, ic, current_unit)
+  match_term(assign, ic, current_unit)
+  value = expr(ic)
+  return Assignment(token, value, line)
+end
+
+# A function or procedure call as a statement.
+# The return value is discarded.
+function call_statement(ic::InputCounter)
+  current_unit = "call statement"
+  token, class, line = token_class_line(ic)
+  match_term(identifier, ic, current_unit)
+  match_term(open_paren, ic, current_unit)
+  args = arguments(ic)
+  match_term(close_paren, ic, current_unit)
+  return CallStatement(token, args, line)
+end
+
+function write_statement(ic::InputCounter)
+  current_unit = "write statement"
+  token, class, line = token_class_line(ic)
+  match_term(kw_writeln, ic, current_unit)
+  match_term(open_paren, ic, current_unit)
+  args = arguments(ic)
+  match_term(close_paren, ic, current_unit)
+  return Write(args, line)
+end
+
+function arguments(ic::InputCounter)
+  current_unit = "arguments"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  args = Vector{Value}()
+  while nextclass(ic) ∉ [close_paren, semicolon]
+    push!(args, expr(ic))
+    nextclass(ic) == comma && match_term(comma, ic, current_unit)
+  end
+  return Arguments(args, line)
+end
+
+function expr(ic::InputCounter)
+  current_unit = "expression"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  left_simple = simple_expr(ic)
+  token, class, line = token_class_line(ic)
+  if class ∈ relational_operators
+    match_term(class, ic, current_unit)
+    right_simple = simple_expr(ic)
+    return RelationalExpression(left_simple, right_simple, token, line)
+  end
+  return left_simple
+end
+
+function simple_expr(ic::InputCounter)
+  current_unit = "simple expression"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  sign = Token(plus, "+", line)
+  if class ∈ [plus, minus]
+    sign = class
+    match_term(class, ic, current_unit)
+  end
+  terms = Array{Tuple{Term,Token},1}()
+  first_term = term(ic)
+  push!(terms, (first_term, sign))
+  while nextclass(ic) ∈ adding_operators
+    operation = next_token(ic)
+    match_term(operation.class, ic, current_unit)
+    new_term = term(ic)
+    push!(terms, (new_term, operation))
+  end
+  return SimpleExpression(terms, line)
+end
+
+function term(ic::InputCounter)
+  current_unit = "term"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  factors = Array{Tuple{Factor,Token},1}()
+  first_factor = factor(ic)
+  push!(factors, (first_factor, Token(identity_op, "identity", line)))
+  while nextclass(ic) ∈ mult_operators
+    operator = next_token(ic)
+    match_term(operator.class, ic, current_unit)
+    push!(factors, (factor(ic), operator))
+  end
+  return Term(factors, line)
+end
+
+function factor(ic::InputCounter)
+  current_unit = "factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  fact = Nothing
+  if class == open_paren
+    fact = paren_factor(ic)
+  elseif class == kw_not
+    fact = not_factor(ic)
+  elseif class ∈ literals
+    fact = literal_factor(ic)
+  elseif class == identifier
+    # The factor is a call or a variable.
+    # Disambiguate by using lookahead.
+    if ic.tokens[ic.index+1].class == open_paren
+      fact = call_factor(ic)
+    else
+      fact = variable_factor(ic)
+    end
+  end
+  token, class, line = token_class_line(ic)
+  if class == dot
+    match_term(dot, ic, current_unit)
+    match_term(kw_size, ic, current_unit)
+    return SizeFactor(fact, line)
+  end
+  return fact
+end
+
+function call_factor(ic::InputCounter)
+  current_unit = "call_factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  id = token
+  match_term(identifier, ic, current_unit)
+  match_term(open_paren, ic, current_unit)
+  args = arguments(ic)
+  match_term(close_paren, ic, current_unit)
+  return CallFactor(id, args, line)
+end
+
+function variable_factor(ic::InputCounter)
+  current_unit = "variable_factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  id = token
+  match_term(identifier, ic, current_unit)
+  token, class, _ = token_class_line(ic)
+  if class == open_sqr_bracket
+    match_term(open_sqr_bracket, ic, current_unit)
+    idx = expr(ic)
+    match_term(close_sqr_bracket, ic, current_unit)
+    return ArrayAccessFactor(id, idx, line)
+  end
+  return VariableFactor(id, line)
+end
+
+# A boolean negation ("not") factor 
+function not_factor(ic::InputCounter)
+  current_unit = "not_factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  match_term(kw_not, ic, current_unit)
+  return NotFactor(factor(ic), line)
+end
+
+function literal_factor(ic::InputCounter)
+  current_unit = "literal_factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  match_term(class, ic, current_unit)
+  return LiteralFactor(token, line)
+end
+
+# Parenthesized expression as factor
+function paren_factor(ic::InputCounter)
+  current_unit = "paren_factor"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  match_term(open_paren, ic, current_unit)
+  expression = expr(ic)
+  match_term(close_paren, ic, current_unit)
+  return ParenFactor(expression, line)
+end
+
+function var_type(ic::InputCounter)
+  current_unit = "var_type"
+  token, class, line = token_class_line(ic)
+  DEBUG && println("this is $(current_unit), next is ", token)
+  if class == kw_array
+    match_term(kw_array, ic, current_unit)
+    match_term(open_sqr_bracket, ic, current_unit)
+    len = expr(ic)
+    match_term(close_sqr_bracket, ic, current_unit)
+    match_term(kw_of, ic, current_unit)
+    s_type = next_token(ic)
+    match_term(identifier, ic, current_unit)
+    return VarType(token_class_to_ref_type[s_type.class], len, line)
+  end
+  match_term(class, ic, current_unit)
+  return VarType(token_class_to_nonref_type[class], ImmediateInt(0), line)
+end
+
+parse_input(source::String) = parse_input(scan_input(source))

@@ -11,40 +11,7 @@ default_real_value = -1.0
 default_bool_value = false
 default_string_value = ""
 
-struct SValue
-  type::MPType
-  value::Union{Int,Float64,Bool,String}
-end
-
-function SValue(tc::TokenClass)
-  if tc == kw_int return SValue(MInt) end
-  if tc == kw_real return SValue(MReal) end
-  if tc == kw_bool return SValue(MBool) end
-  if tc == kw_string return SValue(MString) end
-end
-
-function SValue(type::MPType)
-  if type == MInt return SValue(type, default_int_value) end
-  if type == MBool return SValue(type, default_bool_value) end
-  if type == MString return SValue(type, default_string_value) end
-end
-
-(*)(left::SValue, right::SValue) = SValue(MInt, left.value * right.value)
-
-function (+)(left::SValue, right::SValue)
-  if left.type == MInt
-    return SValue(MInt, left.value + right.value)
-  elseif left.type == MString
-    return SValue(MString, left.value * right.value)
-  end
-end
-
-(-)(left::SValue, right::SValue) = SValue(MInt, left.value - right.value)
-(÷)(left::SValue, right::SValue) = SValue(MInt, left.value ÷ right.value)
-(==)(left::SValue, right::SValue) = SValue(MBool, left.value == right.value)
-(<)(left::SValue, right::SValue) = SValue(left.type, left.value < right.value)
-(&)(left::SValue, right::SValue) = SValue(left.type, left.value & right.value)
-(!)(operand::SValue) = SValue(MBool, !operand.value)
+initial_scope_level = 0
 
 operator_to_function = Dict(
   times => *,
@@ -60,6 +27,13 @@ unary_result_types = Dict(
   (kw_not, MBool) => MBool
 )
 
+array_type_to_scalar_type = Dict(
+  MIntRef => MInt,
+  MRealRef => MReal,
+  MBoolRef => MBool,
+  MStringRef => MString
+)
+
 binary_result_types = DefaultDict(MError,
   (times, MInt, MInt) => MInt,
   (times, MReal, MReal) => MReal,
@@ -72,7 +46,32 @@ binary_result_types = DefaultDict(MError,
   (divide, MReal, MReal) => MReal,
   (modulo, MInt, MInt) => MInt,
   (kw_or, MBool, MBool) => MBool,
-  (kw_and, MBool, MBool) => MBool
+  (kw_and, MBool, MBool) => MBool,
+  (equals, MInt, MInt) => MBool,
+  (not_equal, MInt, MInt) => MBool,
+  (less_than, MInt, MInt) => MBool,
+  (less_than_or_equal, MInt, MInt) => MBool,
+  (greater_than, MInt, MInt) => MBool,
+  (greater_than_or_equal, MInt, MInt) => MBool,
+  (kw_and, MBool, MBool) => MBool,
+  (equals, MReal, MReal) => MBool,
+  (not_equal, MReal, MReal) => MBool,
+  (less_than, MReal, MReal) => MBool,
+  (less_than_or_equal, MReal, MReal) => MBool,
+  (greater_than, MReal, MReal) => MBool,
+  (greater_than_or_equal, MReal, MReal) => MBool,
+  (equals, MString, MString) => MBool,
+  (not_equal, MString, MString) => MBool,
+  (less_than, MString, MString) => MBool,
+  (less_than_or_equal, MString, MString) => MBool,
+  (greater_than, MString, MString) => MBool,
+  (greater_than_or_equal, MString, MString) => MBool,
+  (equals, MBool, MBool) => MBool,
+  (not_equal, MBool, MBool) => MBool,
+  (less_than, MBool, MBool) => MBool,
+  (less_than_or_equal, MBool, MBool) => MBool,
+  (greater_than, MBool, MBool) => MBool,
+  (greater_than_or_equal, MBool, MBool) => MBool,
 )
 
 abstract type SymbolTable end
@@ -84,60 +83,194 @@ mutable struct StackEntry
   scope_level::Int
 end
 
+mutable struct Argument
+  name::String
+  is_var::Bool
+  type::MPType
+  size::Int
+end
+
+mutable struct SubroutineEntry
+  name::String
+  arg_types::Vector{MPType}
+  return_type::MPType
+end
+
 mutable struct StackST <: SymbolTable
   stack::Stack{StackEntry}
+  scope::Int
+  subroutines::Vector{SubroutineEntry}
+  ret_val_exprs::Vector{Value}
+  StackST() = new(Stack{StackEntry}(), initial_scope_level, Vector{SubroutineEntry}(), Vector{Value}())
 end
 
-StackST() = StackST(Stack{StackEntry}())
+function hasvariable(s::StackST, var_name)
+  if DEBUG
+    println("This is hasentry, looking for variable $(var_name). The following names are known:")
+    for entry in s.stack
+      println(entry)
+    end
+  end
+  for entry in s.stack
+    if entry.var_name == var_name
+      return true
+    end
+  end
+  return false
+end
 
-function getentry(s::StackST, var_name)
-  for entry in s
-    entry.var_name == var_name && return entry
+function getvariable(s::StackST, var_name)
+  return getfirst(entry -> entry.var_name == var_name, s.stack)
+end
+
+function popscope!(s::StackST)
+  isempty(s.stack) && return
+  scope = first(s.stack).scope_level
+  while !isempty(s.stack) && first(s.stack).scope_level == scope
+    pop!(s.stack)
   end
 end
 
-function popscope(s::StackST)
-  isempty(s) && return
-  scope = first(s).scope_level
-  while first(s).scope_level == scope
-    pop!(s)
-  end
+function enterscope!(s::StackST)
+  s.scope += 1  
 end
 
-function pushvar!(s::StackST, var_name::String, var_type::MPType, val_identifier::String, new_scope=false::Bool)
-  old_scope = first(s).scope_level
-  scope = new_scope ? old_scope + 1 : old_scope
-  entry = StackEntry(var_name, var_type, val_identifier, scope)
-  push!(s.stack, entry)
+function pushvar!(st::StackST, var_name::String, var_type::MPType, val_identifier::String)
+  entry = StackEntry(var_name, var_type, val_identifier, st.scope)
+  push!(st.stack, entry)
+end
+
+function pushsubroutine!(st::StackST, name::String, arg_types::Vector{MPType}, return_type::MPType)
+  entry = SubroutineEntry(name, arg_types, return_type)
+  push!(st.subroutines, entry)
+end
+
+function hassubroutine(st::StackST, name::String)
+  return any(entry->entry.name == name, st.subroutines)
+end
+
+function getsubroutine(st::StackST, name::String)
+  index = findfirst(sr->sr.name == name, st.subroutines)
+  println("this is getsr, index is $index")
+  println("this is getsr, st contains $(st.subroutines)")
+  return st.subroutines[index]
 end
 
 # The entry point for the static analyzer.
 function static_analysis(AST::Program)
   st = StackST()
+  
   # Process definitions
-  # (not implemented yet)
-
+  static_analysis(AST.definitions, st)
+  
   # Process main block
-  static_analysis(AST.main.statements, st)
+  static_analysis(AST.main, st)
+end
+
+function static_analysis(d::Definitions, st::SymbolTable)
+  for definition in d.defs
+    static_analysis(definition, st)
+  end
+end
+
+function static_analysis(r::Return, st::SymbolTable)
+  typecheck(r.value, st)
+  r.type = MPassed
+end
+
+function static_analysis(s::Subroutine, st::SymbolTable)
+  enterscope!(st)
+  static_analysis(s.params, st)
+  static_analysis(s.ret_type, st)
+  static_analysis(s.body, st)
+  popscope!(st)
+  arg_types = map(par->par.var_type, s.params.params)
+  pushsubroutine!(st, s.name.lexeme, arg_types, s.ret_type.var_type)
+  s.type = MPassed
+end
+
+function static_analysis(p::Parameters, st::SymbolTable)
+  for parameter in p.params
+    static_analysis(parameter, st)
+  end
+  p.type = MPassed
+end
+
+function static_analysis(p::Parameter, st::SymbolTable)
+  typecheck(p.size, st)
+  if p.size.type != MInt
+    throw(StaticAnalysisException(
+      "Array size must have integer value, got $(p.size.type) (line $(p.line))."
+    ))
+  end
+  pushvar!(st, p.name, p.var_type, "")
+  p.type = MPassed
 end
 
 function static_analysis(b::Block, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing Block")
+  enterscope!(st)
   for stmt in b.statements
     static_analysis(stmt, st)
   end
+  popscope!(st)
+  b.type = MPassed
+end
+
+function static_analysis(d::Declaration, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing Declaration")
+  var_type = d.var_type.var_type
+  for name in map(token->token.lexeme, d.names)
+    if hasvariable(st, name)
+      throw(StaticAnalysisException(
+        "Cannot redeclare variable $(name) (line $(d.line))."
+      ))
+    end
+    pushvar!(st, name, var_type, "")
+  end
+  d.type = MPassed
+end
+
+function static_analysis(c::VarType, st::SymbolTable)
+  typecheck(c.size, st)
+  c.type = MPassed
+end
+
+function static_analysis(a::Assignment, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing Assignment")
+  var_name = a.variable.lexeme
+  if !hasvariable(st, var_name)
+    throw(StaticAnalysisException(
+      "Cannot assign to undeclared variable '$(var_name)' (line $(a.line))."
+    ))
+  end
+  value_type = typecheck(a.value, st)
+  entry = getvariable(st, var_name)
+  var_type = entry.var_type
+  if value_type != var_type
+    throw(StaticAnalysisException(
+      "Cannot assign a value of type $(value_type) to a variable of type $(var_type) (line $(a.line))."
+    ))
+  end
+  a.type = MPassed
 end
 
 function static_analysis(p::Write, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing Write")
   static_analysis(p.arguments, st)
+  p.type = MPassed
 end
 
 function static_analysis(a::Arguments, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing Arguments")
   for arg in a.arguments
     typecheck(arg, st)
   end
+  a.type = MPassed
 end
 
 function typecheck(e::SimpleExpression, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing SimpleExpression")
   firsttype = typecheck(e.terms[1][1], st)
   currenttype = firsttype
   if length(e.terms) > 1
@@ -146,7 +279,7 @@ function typecheck(e::SimpleExpression, st::SymbolTable)
       newtype = binary_result_types[(op.class, currenttype, termtype)]
       if newtype == MError
         throw(StaticAnalysisException(
-          "Type mismatch for binary operation \"$(op.lexeme)\" $(op.line)."
+          "Type mismatch ($(currenttype) and $(termtype))for binary operation \"$(op.lexeme)\" $(op.line)."
         ))
       end
       currenttype = newtype
@@ -155,13 +288,37 @@ function typecheck(e::SimpleExpression, st::SymbolTable)
   e.type = currenttype
 end
 
-function typecheck(r::RelationalExpression, st::SymbolTable)
-  typecheck(r.left, st)
-  typecheck(r.right, st)
-  r.type = binary_result_types[(r.left.type, r.right.type, r.operation.class)]
+function typecheck(i::ImmediateInt, st)
+  i.type = MInt
 end
 
-function typecheck(l::Literal, st::SymbolTable)
+function typecheck(i::ImmediateReal, st)
+  i.type = MReal
+end
+
+function typecheck(i::ImmediateString, st)
+  i.type = MString
+end
+
+function typecheck(i::ImmediateBool, st)
+  i.type = MBool
+end
+
+function typecheck(r::RelationalExpression, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing RelationalExpression")
+  typecheck(r.left, st)
+  typecheck(r.right, st)
+  result_type = binary_result_types[(r.operation.class, r.left.type, r.right.type)]
+  if result_type == MError
+    throw(StaticAnalysisException(
+      "Type mismatch ($(r.left.type) and $(r.right.type)) in relational operation on line $(r.line)."
+    ))
+  end
+  r.type = result_type
+end
+
+function typecheck(l::LiteralFactor, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing LiteralFactor")
   class = l.token.class
   if class == int_literal
     l.type = MInt
@@ -178,13 +335,61 @@ function typecheck(l::Literal, st::SymbolTable)
   return l.type
 end
 
+function typecheck(v::VariableFactor, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing VariableFactor")
+  var_name = v.identifier.lexeme
+  if !hasvariable(st, var_name)
+    throw(StaticAnalysisException(
+      "Variable $(var_name) is not defined (line $(v.line))."
+    ))
+  end
+  v.type = getvariable(st, var_name).var_type
+end
+
+function typecheck(a::ArrayAccessFactor, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing ArrayAccessFactor")
+  index_type = typecheck(a.index, st)
+  if index_type != MInt
+    throw(StaticAnalysisException(
+      "Array index should be an integer, got type $(index_type) (line $(a.line))."
+    ))
+  end
+  var_name = a.identifier.lexeme
+  if !hasvariable(st, var_name)
+    throw(StaticAnalysisException(
+      "Variable $(var_name) is not defined (line $(a.line))."
+    ))
+  end
+  a.type = array_type_to_scalar_type[getvariable(st, var_name).var_type]
+end
+
+function typecheck(c::CallFactor, st::SymbolTable)
+  static_analysis(c.arguments, st)
+  subroutine_entry::SubroutineEntry = getsubroutine(st, c.identifier.lexeme)
+  c.type = subroutine_entry.return_type
+end
+
+function typecheck(p::ParenFactor, st::SymbolTable)
+  p.type = typecheck(p.expression, st)
+end
+
+function typecheck(n::NotFactor, st::SymbolTable)
+  arg_type = typecheck(n.argument, st)
+  if arg_type != MBool
+    throw(StaticAnalysisException(
+      "The \"not\" operation requires a boolean argument, got type $(arg_type) on line $(n.line)."
+    ))
+  end
+  n.type = MBool
+end
+
 function typecheck(t::Term, st::SymbolTable)
-  factor_types = [tpl[1].type for tpl in t.factors]
+  factor_types = [typecheck(tpl[1], st) for tpl in t.factors]
   first_type = factor_types[1]
   for tpl in t.factors
     if tpl[1].type != first_type
       throw(StaticAnalysisException(
-        "Type mismatch in operation $(tpl[2]) on line $(tpl[1].line)."
+        "Type mismatch in operation $(tpl[2].class) on line $(tpl[1].line)."
       ))
     end
   end
@@ -192,3 +397,11 @@ function typecheck(t::Term, st::SymbolTable)
   return t.type
 end
 
+function typecheck(s::SizeFactor, st::SymbolTable)
+  array_type = typecheck(s.array, st)
+  if array_type ∉ [MIntRef, MRealRef, MBoolRef, MStringRef]
+    throw(StaticAnalysisException(
+      "Array size is not defined for values of type $(array_type) (on line $(s.line))."))
+  end
+  s.type = MInt
+end
