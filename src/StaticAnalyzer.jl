@@ -184,9 +184,21 @@ function static_analysis(s::Subroutine, st::SymbolTable)
   static_analysis(s.ret_type, st)
   static_analysis(s.body, st)
   popscope!(st)
-  arg_types = map(par->par.var_type, s.params.params)
-  pushsubroutine!(st, s.name.lexeme, arg_types, s.ret_type.var_type)
+  nominal_arg_types = [par.var_type for par in s.params.params]
+  is_reftype = [(par.is_var_par || par.is_array) for par in s.params.params]
+  println(is_reftype)
+  println(nominal_arg_types)
+  println(s.params.params)
+  actual_types =
+    [(is_ref ? scalar_to_ref_type[type] : type) for (type, is_ref) in zip(nominal_arg_types, is_reftype)]
+  pushsubroutine!(st, s.name.lexeme, actual_types, s.ret_type.var_type)
   s.type = MPassed
+end
+
+function static_analysis(c::CallStatement, st::SymbolTable)
+  static_analysis(c.arguments, st)
+  subroutine_entry::SubroutineEntry = getsubroutine(st, c.identifier.lexeme)
+  c.type = MPassed
 end
 
 function static_analysis(p::Parameters, st::SymbolTable)
@@ -249,10 +261,41 @@ function static_analysis(a::Assignment, st::SymbolTable)
   var_type = entry.var_type
   if value_type != var_type
     throw(StaticAnalysisException(
-      "Cannot assign a value of type $(value_type) to a variable of type $(var_type) (line $(a.line))."
+      "Cannot assign a value of type $(value_type) to variable '$(var_name)' of type $(var_type) (line $(a.line))."
     ))
   end
   a.type = MPassed
+end
+
+function static_analysis(i::IfThenElse, st::SymbolTable)
+  cond_type = typecheck(i.condition, st)
+  if cond_type != MBool
+    throw(StaticAnalysisException(
+    "If statement condition must be boolean, got type $cond_type (line $(i.line))."))
+  end
+  static_analysis(i.then_stmt, st)
+  static_analysis(i.else_stmt, st)
+  i.type = MPassed
+end
+
+function static_analysis(i::IfThen, st::SymbolTable)
+  cond_type = typecheck(i.condition, st)
+  if cond_type != MBool
+    throw(StaticAnalysisException(
+    "If statement condition must be boolean, got type $cond_type (line $(i.line))."))
+  end
+  static_analysis(i.then_stmt, st)
+  i.type = MPassed
+end
+
+function static_analysis(w::While, st::SymbolTable)
+  cond_type = typecheck(w.condition, st)
+  if cond_type != MBool
+    throw(StaticAnalysisException(
+    "While statement condition must be boolean, got type $cond_type (line $(w.line))."))
+  end
+  static_analysis(w.do_stmt, st)
+  w.type = MPassed
 end
 
 function static_analysis(p::Write, st::SymbolTable)
@@ -261,12 +304,11 @@ function static_analysis(p::Write, st::SymbolTable)
   p.type = MPassed
 end
 
-function static_analysis(a::Arguments, st::SymbolTable)
-  DEBUG && println("This is static analysis, analysing Arguments")
-  for arg in a.arguments
+function static_analysis(a::Vector{Value}, st::SymbolTable)
+  DEBUG && println("This is static analysis, analysing arguments")
+  for arg in a
     typecheck(arg, st)
   end
-  a.type = MPassed
 end
 
 function typecheck(e::SimpleExpression, st::SymbolTable)
@@ -315,6 +357,16 @@ function typecheck(r::RelationalExpression, st::SymbolTable)
     ))
   end
   r.type = result_type
+end
+
+function typecheck(v::VarAsPar, st::SymbolTable)
+  if !hasvariable(st, v.name)
+    throw(StaticAnalysisException(
+      "Variable name '$(v.name)' given as var argument is not defined (line $(v.line))."
+    ))
+  end
+  variable::StackEntry = getvariable(st, v.name)
+  v.type = scalar_to_ref_type[variable.var_type]
 end
 
 function typecheck(l::LiteralFactor, st::SymbolTable)
@@ -366,7 +418,14 @@ end
 function typecheck(c::CallFactor, st::SymbolTable)
   static_analysis(c.arguments, st)
   subroutine_entry::SubroutineEntry = getsubroutine(st, c.identifier.lexeme)
-  c.type = subroutine_entry.return_type
+  ret_type = subroutine_entry.return_type
+  if ret_type == MNothing
+    name = subroutine_entry.name
+    throw(StaticAnalysisException(
+      "A call to subroutine '$name' cannot be used as a value as it has no return type (line $(c.line))."
+    ))
+  end
+  c.type = ret_type
 end
 
 function typecheck(p::ParenFactor, st::SymbolTable)

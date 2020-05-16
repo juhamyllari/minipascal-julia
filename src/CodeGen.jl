@@ -2,8 +2,12 @@ include("StaticAnalyzer.jl")
 
 const INT_STR_ID = "@int_str"
 const REAL_STR_ID = "@real_str"
+const STR_STR_ID = "@str_str"
 const TRUE_STR_ID = "@true"
 const FALSE_STR_ID = "@false"
+const EMPTY_STR_ID = "@empty"
+
+const STRING_TYPE_ID = "%string"
 
 add_op_and_type_to_opcode = Dict{Tuple{TokenClass,MPType},String}(
   (plus, MInt) => "add",
@@ -24,8 +28,14 @@ mult_op_and_type_to_opcode = Dict{Tuple{TokenClass,MPType},String}(
 
 mptype_to_llvm_type = Dict{MPType,String}(
   MInt => "i64",
+  MIntRef => "i64*",
   MReal => "double",
-  MBool => "i1"
+  MRealRef => "double*",
+  MBool => "i1",
+  MString => "i8*",
+  MStringRef => "i8**",
+  MBoolRef => "i1*",
+  MNothing => "void",
 )
 
 op_and_type_to_cond = Dict{Tuple{TokenClass,MPType},String}(
@@ -71,57 +81,77 @@ generate(program::String) = generate(program::String, IOBuffer())
 
 function generate_header(io)
   ptln(io, "")
-  ptln(io, "define i32 @main(i32, i8**) #0 {")
+  ptln(io, "define i32 @main(i32, i8**) {")
 end
 
-function generate_strings(io)
-  ptln(io, "$(INT_STR_ID) = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\", align 1")
-  ptln(io, "$(REAL_STR_ID) = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\", align 1")
-  ptln(io, "$(TRUE_STR_ID) = private unnamed_addr constant [6 x i8] c\"true\\0A\\00\", align 1")
-  ptln(io, "$(FALSE_STR_ID) = private unnamed_addr constant [7 x i8] c\"false\\0A\\00\", align 1")
+function generate_strings(io, pc::ParsingContext)
+  ptln(io, "$INT_STR_ID = private constant [3 x i8] c\"%d\\00\"")
+  ptln(io, "$REAL_STR_ID = private constant [3 x i8] c\"%f\\00\"")
+  ptln(io, "$STR_STR_ID = private constant [3 x i8] c\"%s\\00\"")
+  ptln(io, "$TRUE_STR_ID = private constant [5 x i8] c\"true\\00\"")
+  ptln(io, "$FALSE_STR_ID = private constant [6 x i8] c\"false\\00\"")
+  ptln(io, "$EMPTY_STR_ID = private constant [1 x i8] c\"\\00\"")
+  generate_string_literals(io, pc)
   ptln(io, "")
+end
+
+function generate_string_literals(io, pc::ParsingContext)
+  for literal::LiteralFactor in pc.string_literals
+    str = literal.token.lexeme
+    len = length(str)
+    ptln(io, "$(literal.unique_id) = private constant [$len x i8] c\"$str\"")
+  end
 end
 
 function generate_footer(io)
   ptln(io, "ret i32 0", 1) # Main returns 0
   ptln(io, "}\n") # Close main
-  ptln(io, "declare i32 @printf(i8*, ...) #1")
+  ptln(io, "declare i32 @printf(i8*, ...)")
+  ptln(io, "declare i32 @puts(i8*)")
   ptln(io, "")
   generate_writebool(io)
+end
+
+function generate_types(io)
+  ptln(io, "$STRING_TYPE_ID = type { i8*, i32 }")
 end
 
 function generate_writebool(io)
   fct =
 """
 define void @printbool(i1 %a) {
-  entry:
-    br i1 %a, label %is_true, label %is_false
-  is_true:
-    call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([6 x i8], [6 x i8]* $(TRUE_STR_ID), i32 0, i32 0), i1 %a)
-    br label %end
-  is_false:
-    call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([7 x i8], [7 x i8]* $(FALSE_STR_ID), i32 0, i32 0), i1 %a)
-    br label %end
-  end:
-    ret void
+entry:
+  br i1 %a, label %is_true, label %is_false
+is_true:
+  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([5 x i8], [5 x i8]* $(TRUE_STR_ID), i32 0, i32 0), i1 %a)
+  br label %end
+is_false:
+  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([6 x i8], [6 x i8]* $(FALSE_STR_ID), i32 0, i32 0), i1 %a)
+  br label %end
+end:
+  ret void
 }
 """
   print(io, fct)
 end
 
 function generate(program::String, io)
-  AST = parse_input(scan_input(program))
+  token_sequence = scan_input(program)
+  DEBUG && println("scanning finished")
+  pc = ParsingContext(token_sequence)
+  AST = parse_input(token_sequence, pc)
   DEBUG && println("parsing finished")
   static_analysis(AST)
   DEBUG && println("static analysis finished")
-  generate(AST, io)
+  generate(AST, pc, io)
   DEBUG && println("codegen finished")
   reset_id()
 end
 
-function generate(AST::Program, io)
+function generate(AST::Program, pc::ParsingContext, io)
   st = StackST()
-  generate_strings(io)
+  generate_strings(io, pc)
+  generate_types(io)
   generate(AST.definitions, st, io)
   add_predefined_names(st, io)
   generate_header(io)
@@ -144,14 +174,19 @@ function generate(s::Subroutine, st::SymbolTable, io)
   ret_type = s.ret_type.var_type
   llvm_ret_type = mptype_to_llvm_type[ret_type]
   params = s.params.params
+  println("this is generate subr, params is $params")
   args = Vector{String}()
   for param::Parameter in params
+    true_type = (param.is_var_par || param.is_array) ? scalar_to_ref_type[param.var_type] : param.var_type
     pushvar!(st, param.name, param.var_type, "%$(param.name)")
-    push!(args, "$(mptype_to_llvm_type[param.var_type]) %$(param.name)")
+    push!(args, "$(mptype_to_llvm_type[true_type]) %$(param.name)")
   end
   argstring = join(args, ", ")
   ptln(io, "define $llvm_ret_type @$(s.name.lexeme)($argstring) {")
   generate(s.body, st, io)
+  if ret_type == MNothing
+    ptln(io, "ret void", 1)
+  end
   ptln(io, "}")
   pushsubroutine!(st, s.name.lexeme, Vector{MPType}(), s.ret_type.var_type)
 end
@@ -165,9 +200,62 @@ function generate(b::Block, st::SymbolTable, io)
 end
 
 function generate(d::Declaration, st::SymbolTable, io)
+  llvm_type = mptype_to_llvm_type[d.var_type.var_type]
   for name in d.names
-    pushvar!(st, name.lexeme, d.var_type.var_type, "")
+    llvm_name = create_id("alloc")
+    ptln(io, "$llvm_name = alloca $llvm_type", 1)
+    pushvar!(st, name.lexeme, d.var_type.var_type, llvm_name)
   end
+end
+
+function generate(i::IfThen, st::SymbolTable, io)
+  cond_id = generate(i.condition, st, io)
+  then_label = create_id("then")
+  end_label = create_id("end_if")
+  ptln(io, "br i1 $cond_id, label $then_label, label $end_label", 1)
+  ptln(io, "$(then_label[2:end]):")
+  cond_id = generate(i.then_stmt, st, io)
+  ptln(io, "br label $end_label", 1)
+  ptln(io, "$(end_label[2:end]):")
+end
+
+function generate(i::IfThenElse, st::SymbolTable, io)
+  cond_id = generate(i.condition, st, io)
+  then_label = create_id("then_")
+  else_label = create_id("else_")
+  end_label = create_id("end_if_")
+  ptln(io, "br i1 $cond_id, label $then_label, label $else_label", 1)
+  ptln(io, "$(then_label[2:end]):")
+  generate(i.then_stmt, st, io)
+  ptln(io, "br label $end_label", 1)
+  ptln(io, "$(else_label[2:end]):")
+  generate(i.else_stmt, st, io)
+  ptln(io, "br label $end_label", 1)
+  ptln(io, "$(end_label[2:end]):")
+end
+
+function generate(w::While, st::SymbolTable, io)
+  while_label = create_id("while_")
+  do_label = create_id("do_")
+  end_label = create_id("end_if_")
+  ptln(io, "br label $while_label", 1)
+  ptln(io, "$(while_label[2:end]):")
+  cond_id = generate(w.condition, st, io)
+  ptln(io, "br i1 $cond_id, label $do_label, label $end_label", 1)
+  ptln(io, "$(do_label[2:end]):")
+  generate(w.do_stmt, st, io)
+  ptln(io, "br label $while_label", 1)
+  ptln(io, "$(end_label[2:end]):")
+end
+
+function generate(c::CallStatement, st::SymbolTable, io)
+  subroutine::SubroutineEntry = getsubroutine(st, c.identifier.lexeme)
+  println("this is generate CallStatement, args are $(c.arguments)")
+  arg_ids = [generate(arg, st, io) for arg in c.arguments]
+  arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments]
+  arg_strs = ["$type $id" for (type, id) in zip(arg_types, arg_ids)]
+  arg_string = join(arg_strs,  ", ")
+  ptln(io, "call void @$(subroutine.name)($arg_string)", 1)
 end
 
 function generate(r::Return, st::SymbolTable, io)
@@ -177,13 +265,15 @@ function generate(r::Return, st::SymbolTable, io)
 end
 
 function generate(a::Assignment, st::SymbolTable, io)
+  value_llvm_type = mptype_to_llvm_type[a.value.type]
   value_id = generate(a.value, st, io)
-  entry = getvariable(st, a.variable.lexeme)
-  entry.val_identifier = value_id
+  entry::StackEntry = getvariable(st, a.variable.lexeme)
+  variable_pointer = entry.val_identifier
+  ptln(io, "store $value_llvm_type $value_id, $value_llvm_type* $variable_pointer", 1)
 end
 
 function generate(p::Write, st::SymbolTable, io)
-  for arg in p.arguments.arguments
+  for arg in p.arguments
     arg_id = generate(arg, st, io)
     if arg.type == MBool
       ptln(io, "call void @printbool(i1 $(arg_id))", 1)
@@ -191,9 +281,22 @@ function generate(p::Write, st::SymbolTable, io)
       arg_type = mptype_to_llvm_type[arg.type]
       envelope_id = arg.type == MInt ? INT_STR_ID : REAL_STR_ID
       pt(io, "call i32 (i8*, ...) ", 1)
-      ptln(io, "@printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* $(envelope_id), i32 0, i32 0), $(arg_type) $(arg_id))")
+      ptln(io, "@printf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* $(envelope_id), i32 0, i32 0), $(arg_type) $(arg_id))")
+    elseif arg.type == MString
+      str_ptr_id = create_id("str_ptr_id")
+      ptln(io, "$str_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $arg_id, i32 0, i32 0", 1)
+      str_id = create_id("str_id")
+      ptln(io, "$str_id = load i8*, i8** $str_ptr_id", 1)
+      ptln(io, "call i32 (i8*, ...) @printf(i8* getelementptr ([3 x i8], [3 x i8]* $STR_STR_ID, i32 0, i32 0), i8* $str_id)", 1)
     end
   end
+  ptln(io, "call i32 @puts(i8* getelementptr inbounds ([1 x i8], [1 x i8]* $EMPTY_STR_ID, i32 0, i32 0))", 1)
+end
+
+function generate(v::VarAsPar, st::SymbolTable, io)
+  variable::StackEntry = getvariable(st, v.name)
+  println("this is generate VarAsPar, variable is $variable")
+  return variable.val_identifier
 end
 
 function generate(s::SimpleExpression, st::SymbolTable, io)
@@ -271,6 +374,19 @@ function generate(l::LiteralFactor, st::SymbolTable, io)
   elseif l.type == MReal
     ret_id = create_id("real_lit")
     ptln(io, "$(ret_id) = fadd double 0.0, $(l.token.lexeme) ", 1)
+  elseif l.type == MString
+    ret_id = create_id("str_lit")
+    str_len = length(l.token.lexeme)
+    # ret_id = l.unique_id
+    ptln(io, "$ret_id = alloca $STRING_TYPE_ID", 1)
+    str_ptr_id = create_id("str_ptr")
+    lit_as_ptr_id = create_id("lit_ptr")
+    ptln(io, "$lit_as_ptr_id = bitcast [$str_len x i8]* $(l.unique_id) to i8*", 1)
+    ptln(io, "$str_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $ret_id, i32 0, i32 0", 1)
+    ptln(io, "store i8* $lit_as_ptr_id, i8** $str_ptr_id", 1)
+    str_len_ptr_id = create_id("str_len")
+    ptln(io, "$str_len_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $ret_id, i32 0, i32 1", 1)
+    ptln(io, "store i32 $(str_len), i32* $str_len_ptr_id", 1)
   else
     println("codegen for non-int literals not implemented yet")
   end
@@ -282,8 +398,11 @@ function generate(p::ParenFactor, st::SymbolTable, io)
 end
 
 function generate(v::VariableFactor, st::SymbolTable, io)
+  llvm_type = mptype_to_llvm_type[v.type]
   entry = getvariable(st, v.identifier.lexeme)
-  return entry.val_identifier
+  ret_id = create_id("var_val")
+  ptln(io, "$ret_id = load $llvm_type, $llvm_type* $(entry.val_identifier)", 1)
+  return ret_id
 end
 
 function generate(n::NotFactor, st::SymbolTable, io)
@@ -294,10 +413,11 @@ function generate(n::NotFactor, st::SymbolTable, io)
 end
 
 function generate(c::CallFactor, st::SymbolTable, io)
+  # To do: handle VarAsPar appropriately
   println("this is generate CallFactor, sr id lex is $(c.identifier.lexeme)")
   subroutine::SubroutineEntry = getsubroutine(st, c.identifier.lexeme)
-  arg_ids = [generate(arg, st, io) for arg in c.arguments.arguments]
-  arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments.arguments ]
+  arg_ids = [generate(arg, st, io) for arg in c.arguments]
+  arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments ]
   arg_strs = ["$type $id" for (type, id) in zip(arg_types, arg_ids)]
   arg_string = join(arg_strs,  ", ")
   ret_id = create_id("ret")

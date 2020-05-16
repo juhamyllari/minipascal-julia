@@ -89,11 +89,56 @@ begin
 end.
 """
 
+const prog9 = """
+program defs;
+
+function double_and_return_orig(var x:int): int;
+  begin
+    var tmp: int;
+    tmp := x;
+    x := 2*x;
+    return tmp;
+  end;
+
+begin
+  var a, b: int;
+  a := 23;
+  b := double_and_return_orig(a);
+  writeln(a);
+  writeln(b);
+end.
+"""
+
+const prog10 = """
+program foo;
+
+begin
+  var x: int;
+  x := 23;
+  if x > 0
+  then writeln(2*x)
+  else writeln(x);
+end.
+"""
+
+const prog11 = """
+program foo;
+
+begin
+  var x : int;
+  x := 0;
+  while x < 3
+  do begin
+    writeln("hello world!");
+    x := x+1;
+  end;
+end.
+"""
 
 @testset "MiniPascal.jl" begin
     # Write your own tests here.
     io = IOBuffer()
-    m.generate(prog8, io)
+    m.generate(prog11, io)
     code = String(take!(io))
     println(code)
 

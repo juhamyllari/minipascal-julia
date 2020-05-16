@@ -17,6 +17,8 @@
 11.5. 2h  Static checking
 12.5. 3h  Code generation for integers
 13.5. 4h  Code generation
-14.5. ?h  Variables, functions
+14.5. 5h  Variables, functions
+15.5. 5h  Variables, functions, strings
+16.5. 9h  Strings, if statement, while statement
 
 TOTAL ?h
