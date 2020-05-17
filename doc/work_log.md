@@ -20,5 +20,6 @@
 14.5. 5h  Variables, functions
 15.5. 5h  Variables, functions, strings
 16.5. 9h  Strings, if statement, while statement
+17.5. ?h  Refactoring
 
 TOTAL ?h

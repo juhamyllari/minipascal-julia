@@ -1,13 +1,5 @@
 include("StaticAnalyzer.jl")
-
-const INT_STR_ID = "@int_str"
-const REAL_STR_ID = "@real_str"
-const STR_STR_ID = "@str_str"
-const TRUE_STR_ID = "@true"
-const FALSE_STR_ID = "@false"
-const EMPTY_STR_ID = "@empty"
-
-const STRING_TYPE_ID = "%string"
+include("PredefinedSubroutines.jl")
 
 add_op_and_type_to_opcode = Dict{Tuple{TokenClass,MPType},String}(
   (plus, MInt) => "add",
@@ -32,8 +24,8 @@ mptype_to_llvm_type = Dict{MPType,String}(
   MReal => "double",
   MRealRef => "double*",
   MBool => "i1",
-  MString => "i8*",
-  MStringRef => "i8**",
+  MString => STRING_TYPE_ID * "*",
+  MStringRef => STRING_TYPE_ID * "**",
   MBoolRef => "i1*",
   MNothing => "void",
 )
@@ -125,30 +117,19 @@ function generate_footer(gc::GenerationContext)
   ptln(gc, "}\n") # Close main
   ptln(gc, "declare i32 @printf(i8*, ...)")
   ptln(gc, "declare i32 @puts(i8*)")
-  generate_writebool(gc)
+  ptln(gc, "declare i8* @strcpy(i8*, i8* nocapture readonly)")
+  ptln(gc, "declare i8* @strcat(i8*, i8* nocapture readonly)")
+  generate_helpers(gc)
 end
 
 function generate_types(gc)
   ptln(gc, "$STRING_TYPE_ID = type { i8*, i32 }")
 end
 
-function generate_writebool(gc)
-  fct =
-"""
-define void @printbool(i1 %a) {
-entry:
-  br i1 %a, label %is_true, label %is_false
-is_true:
-  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([5 x i8], [5 x i8]* $(TRUE_STR_ID), i32 0, i32 0), i1 %a)
-  br label %end
-is_false:
-  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([6 x i8], [6 x i8]* $(FALSE_STR_ID), i32 0, i32 0), i1 %a)
-  br label %end
-end:
-  ret void
-}
-"""
-  print(gc, fct)
+function generate_helpers(gc)
+  for helper in HELPER_FUNCTIONS
+    ptln(gc, helper)
+  end
 end
 
 function generate(program::String, io)
@@ -293,16 +274,16 @@ function generate(p::Write, gc::GenerationContext)
   for arg in p.arguments
     arg_id = generate(arg, gc)
     if arg.type == MBool
-      ptln(gc, "call void @printbool(i1 $(arg_id))", 1)
+      ptln(gc, "call void @print_bool(i1 $(arg_id))", 1)
     elseif arg.type ∈ [MInt, MReal]
       arg_type = mptype_to_llvm_type[arg.type]
       envelope_id = arg.type == MInt ? INT_STR_ID : REAL_STR_ID
       pt(gc, "call i32 (i8*, ...) ", 1)
       ptln(gc, "@printf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* $(envelope_id), i32 0, i32 0), $(arg_type) $(arg_id))")
     elseif arg.type == MString
-      str_ptr_id = create_id(gc, "str_ptr_id")
+      str_ptr_id = create_id(gc, "str_ptr")
       ptln(gc, "$str_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $arg_id, i32 0, i32 0", 1)
-      str_id = create_id(gc, "str_id")
+      str_id = create_id(gc, "str")
       ptln(gc, "$str_id = load i8*, i8** $str_ptr_id", 1)
       ptln(gc, "call i32 (i8*, ...) @printf(i8* getelementptr ([3 x i8], [3 x i8]* $STR_STR_ID, i32 0, i32 0), i8* $str_id)", 1)
     end
@@ -334,10 +315,21 @@ function generate(s::SimpleExpression, gc::GenerationContext)
   if length(s.terms) > 1
     for (term, op) in s.terms[2:end]
       term_id = generate(term, gc)
-      new_ret_id = create_id(gc, "sum_diff_or")
-      opcode = add_op_and_type_to_opcode[(op.class, ret_type)]
-      ptln(gc, "$(new_ret_id) = $(opcode) $llvm_type $(ret_id), $(term_id)", 1)
-      ret_id = new_ret_id
+      if ret_type == MString
+        new_ret_id = create_id(gc, "concat")
+        length_id = create_id(gc, "str_len")
+        new_str_id = create_id(gc, "new_str")
+        ptln(gc, "$new_ret_id = alloca $STRING_TYPE_ID", 1)
+        ptln(gc, "$length_id = call i32 @combined_length($STRING_TYPE_ID* $ret_id, $STRING_TYPE_ID* $term_id)", 1)
+        ptln(gc, "$new_str_id = alloca i8, i32 $length_id", 1)
+        ptln(gc, "call void $CONCAT_ID($STRING_TYPE_ID* $new_ret_id, i8* $new_str_id, $STRING_TYPE_ID* $ret_id, $STRING_TYPE_ID* $term_id)", 1)
+        ret_id = new_ret_id
+      else
+        new_ret_id = create_id(gc, "sum_diff_or")
+        opcode = add_op_and_type_to_opcode[(op.class, ret_type)]
+        ptln(gc, "$(new_ret_id) = $(opcode) $llvm_type $(ret_id), $(term_id)", 1)
+        ret_id = new_ret_id
+      end
     end
   end
   return ret_id

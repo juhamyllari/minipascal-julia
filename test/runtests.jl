@@ -125,22 +125,32 @@ const prog11 = """
 program foo;
 
 begin
-  var x : int;
+  var x, y : int;
+  var s : string;
+  y := 5;
   x := 0;
-  while x < 3
+  while x < 10
   do begin
-    writeln("hello ", x, " times, world!");
+    if x <= y
+      then s := " is less than or equal to "
+      else s := " is greater than ";
+    writeln(x, s, y);
     x := x+1;
-    {*writeln("do we need a comment?");*}
-    writeln("do we need another comment?");
   end;
 end.
 """
 
+const prog12 = """
+program foo;
+
+begin
+  writeln("hello " + "there ", "world!");
+end.
+"""
 @testset "MiniPascal.jl" begin
     # Write your own tests here.
     io = IOBuffer()
-    m.generate(prog11, io)
+    m.generate(prog12, io)
     code = String(take!(io))
     println(code)
 
@@ -149,7 +159,6 @@ end.
     println(file, code)
     close(file)
     run(`lli $(filename)`)
-
 
     # parsed = m.parseInput(prog3)
     # print(parsed)
