@@ -157,17 +157,15 @@ function scan_input(input::AbstractString, next = 1)
     commentNesting = 0
     while (input[next] in whitespace
       || commentNesting > 0
-      || (input[next] == '/' && input[next+1] == '/')
-      || (input[next] == '/' && input[next+1] == '*'))
+      || (input[next] == '{' && input[next+1] == '*'))
+      # || (input[next] == '/' && input[next+1] == '*'))
       if input[next] == '\n'
         lineNumber += 1
         next += 1
-      elseif input[next] == '/' && input[next+1] == '/' && commentNesting == 0
-        while input[next] != '\n' && (next < length(input) - 1) next += 1 end
-      elseif input[next] == '/' && input[next+1] == '*'
+      elseif input[next] == '{' && input[next+1] == '*'
         commentNesting += 1
         next += 2
-      elseif input[next] == '*' && input[next+1] == '/'
+      elseif input[next] == '*' && input[next+1] == '}'
         commentNesting -= 1
         next += 2
       else

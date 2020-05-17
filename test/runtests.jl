@@ -129,8 +129,10 @@ begin
   x := 0;
   while x < 3
   do begin
-    writeln("hello world!");
+    writeln("hello ", x, " times, world!");
     x := x+1;
+    {*writeln("do we need a comment?");*}
+    writeln("do we need another comment?");
   end;
 end.
 """
@@ -142,7 +144,7 @@ end.
     code = String(take!(io))
     println(code)
 
-    filename = "out2.ll"
+    filename = "out.ll"
     file = open(filename, "w")
     println(file, code)
     close(file)

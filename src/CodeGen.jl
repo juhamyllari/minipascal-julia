@@ -115,8 +115,8 @@ end
 function generate_string_literals(gc::GenerationContext)
   for literal::LiteralFactor in gc.string_literals
     str = literal.token.lexeme
-    len = length(str)
-    ptln(gc, "$(literal.unique_id) = private constant [$len x i8] c\"$str\"")
+    len = length(str) + 1 # Account for terminating null
+    ptln(gc, "$(literal.unique_id) = private constant [$len x i8] c\"$str\\00\"")
   end
 end
 
@@ -125,7 +125,6 @@ function generate_footer(gc::GenerationContext)
   ptln(gc, "}\n") # Close main
   ptln(gc, "declare i32 @printf(i8*, ...)")
   ptln(gc, "declare i32 @puts(i8*)")
-  ptln(gc, "")
   generate_writebool(gc)
 end
 
@@ -394,8 +393,7 @@ function generate(l::LiteralFactor, gc::GenerationContext)
     ptln(gc, "$(ret_id) = fadd double 0.0, $(l.token.lexeme) ", 1)
   elseif l.type == MString
     ret_id = create_id(gc, "str_lit")
-    str_len = length(l.token.lexeme)
-    # ret_id = l.unique_id
+    str_len = length(l.token.lexeme) + 1  # Account for terminating null
     ptln(gc, "$ret_id = alloca $STRING_TYPE_ID", 1)
     str_ptr_id = create_id(gc, "str_ptr")
     lit_as_ptr_id = create_id(gc, "lit_ptr")

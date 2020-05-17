@@ -103,17 +103,17 @@ mutable struct VarAsPar <: Value
   VarAsPar(name, line) = new(name, line, MUndefined)
 end
 
-mutable struct Parameters <: Node
-  params::Vector{Parameter}
-  line::Int
-  type::MPType
-  Parameters(params, line) = new(params, line, MUndefined)
-end
+# mutable struct Parameters <: Node
+#   params::Vector{Parameter}
+#   line::Int
+#   type::MPType
+#   Parameters(params, line) = new(params, line, MUndefined)
+# end
 
 # Function or procedure.
 mutable struct Subroutine <: Node
   name::Token
-  params::Parameters
+  params::Vector{Parameter}
   ret_type::VarType
   body::Block
   line::Int
@@ -454,7 +454,7 @@ function parameters(pc::ParsingContext)
       end
     end
   end
-  return Parameters(params, line)
+  return params
 end
 
 function parameter(pc::ParsingContext)
@@ -654,7 +654,7 @@ function arguments(pc::ParsingContext, subroutine_name::String)
       "Cannot call undefined subroutine $subroutine_name (line $line)."
     ))
   end
-  parameters = (subroutine::Subroutine).params.params
+  parameters = (subroutine::Subroutine).params
   args = Vector{Value}()
   for parameter::Parameter in parameters
     if parameter.is_var_par

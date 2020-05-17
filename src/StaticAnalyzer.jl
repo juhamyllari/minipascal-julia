@@ -105,16 +105,9 @@ end
 function hasvariable(s::SymbolTable, var_name::String)
   if DEBUG
     println("This is hasentry, looking for variable $(var_name). The following names are known:")
-    for entry in s.stack
-      println(entry)
-    end
+    foreach(println, s.stack)
   end
-  for entry in s.stack
-    if entry.var_name == var_name
-      return true
-    end
-  end
-  return false
+  return any(entry->entry.var_name == var_name, s.stack)
 end
 
 function getvariable(s::SymbolTable, var_name)
@@ -177,16 +170,17 @@ function static_analysis(r::Return, st::SymbolTable)
 end
 
 function static_analysis(s::Subroutine, st::SymbolTable)
-  enterscope!(st)
-  static_analysis(s.params, st)
-  static_analysis(s.ret_type, st)
-  static_analysis(s.body, st)
-  popscope!(st)
+  subroutine_st = SymbolTable()    # Calling scope is not inherited
+  enterscope!(subroutine_st)
+  static_analysis(s.params, subroutine_st)
+  static_analysis(s.ret_type, subroutine_st)
+  static_analysis(s.body, subroutine_st)
+  # popscope!(st)
   nominal_arg_types = [par.var_type for par in s.params.params]
   is_reftype = [(par.is_var_par || par.is_array) for par in s.params.params]
-  println(is_reftype)
-  println(nominal_arg_types)
-  println(s.params.params)
+  # println(is_reftype)
+  # println(nominal_arg_types)
+  # println(s.params.params)
   actual_types =
     [(is_ref ? scalar_to_ref_type[type] : type) for (type, is_ref) in zip(nominal_arg_types, is_reftype)]
   pushsubroutine!(st, s.name.lexeme, actual_types, s.ret_type.var_type)
@@ -199,11 +193,10 @@ function static_analysis(c::CallStatement, st::SymbolTable)
   c.type = MPassed
 end
 
-function static_analysis(p::Parameters, st::SymbolTable)
-  for parameter in p.params
+function static_analysis(p::Vector{Parameter}, st::SymbolTable)
+  for parameter in p
     static_analysis(parameter, st)
   end
-  p.type = MPassed
 end
 
 function static_analysis(p::Parameter, st::SymbolTable)
