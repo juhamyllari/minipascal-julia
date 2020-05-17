@@ -74,8 +74,6 @@ binary_result_types = DefaultDict(MError,
   (greater_than_or_equal, MBool, MBool) => MBool,
 )
 
-abstract type SymbolTable end
-
 mutable struct StackEntry
   var_name::String
   var_type::MPType
@@ -96,15 +94,15 @@ mutable struct SubroutineEntry
   return_type::MPType
 end
 
-mutable struct StackST <: SymbolTable
+mutable struct SymbolTable
   stack::Stack{StackEntry}
   scope::Int
   subroutines::Vector{SubroutineEntry}
   ret_val_exprs::Vector{Value}
-  StackST() = new(Stack{StackEntry}(), initial_scope_level, Vector{SubroutineEntry}(), Vector{Value}())
+  SymbolTable() = new(Stack{StackEntry}(), initial_scope_level, Vector{SubroutineEntry}(), Vector{Value}())
 end
 
-function hasvariable(s::StackST, var_name)
+function hasvariable(s::SymbolTable, var_name::String)
   if DEBUG
     println("This is hasentry, looking for variable $(var_name). The following names are known:")
     for entry in s.stack
@@ -119,11 +117,11 @@ function hasvariable(s::StackST, var_name)
   return false
 end
 
-function getvariable(s::StackST, var_name)
+function getvariable(s::SymbolTable, var_name)
   return getfirst(entry -> entry.var_name == var_name, s.stack)
 end
 
-function popscope!(s::StackST)
+function popscope!(s::SymbolTable)
   isempty(s.stack) && return
   scope = first(s.stack).scope_level
   while !isempty(s.stack) && first(s.stack).scope_level == scope
@@ -131,25 +129,25 @@ function popscope!(s::StackST)
   end
 end
 
-function enterscope!(s::StackST)
+function enterscope!(s::SymbolTable)
   s.scope += 1  
 end
 
-function pushvar!(st::StackST, var_name::String, var_type::MPType, val_identifier::String)
+function pushvar!(st::SymbolTable, var_name::String, var_type::MPType, val_identifier::String)
   entry = StackEntry(var_name, var_type, val_identifier, st.scope)
   push!(st.stack, entry)
 end
 
-function pushsubroutine!(st::StackST, name::String, arg_types::Vector{MPType}, return_type::MPType)
+function pushsubroutine!(st::SymbolTable, name::String, arg_types::Vector{MPType}, return_type::MPType)
   entry = SubroutineEntry(name, arg_types, return_type)
   push!(st.subroutines, entry)
 end
 
-function hassubroutine(st::StackST, name::String)
+function hassubroutine(st::SymbolTable, name::String)
   return any(entry->entry.name == name, st.subroutines)
 end
 
-function getsubroutine(st::StackST, name::String)
+function getsubroutine(st::SymbolTable, name::String)
   index = findfirst(sr->sr.name == name, st.subroutines)
   println("this is getsr, index is $index")
   println("this is getsr, st contains $(st.subroutines)")
@@ -158,7 +156,7 @@ end
 
 # The entry point for the static analyzer.
 function static_analysis(AST::Program)
-  st = StackST()
+  st = SymbolTable()
   
   # Process definitions
   static_analysis(AST.definitions, st)
