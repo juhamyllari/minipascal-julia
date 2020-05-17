@@ -144,7 +144,7 @@ const prog12 = """
 program foo;
 
 begin
-  writeln("hello " + "there ", "world!");
+  writeln("A" + "B" + "C" = "AB"+"C");
 end.
 """
 @testset "MiniPascal.jl" begin

@@ -10,6 +10,7 @@ const STRING_TYPE_ID = "%string"
 const CONCAT_ID = "@concat"
 const COMB_LEN_ID = "@combined_length"
 const WRITE_BOOL_ID = "@print_bool"
+const COMP_STRS_ID = "@compare_strings"
 
 const write_bool = """
 define void $WRITE_BOOL_ID(i1 %a) {
@@ -52,9 +53,20 @@ define void $CONCAT_ID($STRING_TYPE_ID* %dest, i8* %new_string, $STRING_TYPE_ID*
 }
 """
 
+const compare_strings = """
+define i32 $COMP_STRS_ID($STRING_TYPE_ID* %str1, $STRING_TYPE_ID* %str2) {
+  %str1.ptr = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* %str1, i32 0, i32 0
+  %str1.str = load i8*, i8** %str1.ptr
+  %str2.ptr = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* %str2, i32 0, i32 0 
+  %str2.str = load i8*, i8** %str2.ptr
+  %res = call i32 @strcmp(i8* %str1.str, i8* %str2.str)
+  ret i32 %res
+}
+"""
 
 const HELPER_FUNCTIONS = [
   write_bool,
   combined_length,
   concat,
+  compare_strings
 ]

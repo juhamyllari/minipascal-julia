@@ -119,6 +119,8 @@ function generate_footer(gc::GenerationContext)
   ptln(gc, "declare i32 @puts(i8*)")
   ptln(gc, "declare i8* @strcpy(i8*, i8* nocapture readonly)")
   ptln(gc, "declare i8* @strcat(i8*, i8* nocapture readonly)")
+  ptln(gc, "declare i32 @strcmp(i8* nocapture, i8* nocapture)")
+  ptln(gc, "")
   generate_helpers(gc)
 end
 
@@ -346,7 +348,10 @@ function generate(r::RelationalExpression, gc::GenerationContext)
     opcode = arg_type == MReal ? "fcmp" : "icmp"
     ptln(gc, "$ret_id = $opcode $cond $arg_llvm_type $left, $right", 1)
   else
-    println("rel exprs for strings or bools not implemented yet")
+    comp_id = create_id(gc, "comp")
+    ptln(gc, "$comp_id = call i32 $COMP_STRS_ID($STRING_TYPE_ID* $left, $STRING_TYPE_ID* $right)", 1)
+    cond = op_and_type_to_cond[(r.operation.class, MInt)]
+    ptln(gc, "$ret_id = icmp $cond i32 $comp_id, 0", 1)
   end
   return ret_id
 end

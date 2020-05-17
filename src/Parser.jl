@@ -103,13 +103,6 @@ mutable struct VarAsPar <: Value
   VarAsPar(name, line) = new(name, line, MUndefined)
 end
 
-# mutable struct Parameters <: Node
-#   params::Vector{Parameter}
-#   line::Int
-#   type::MPType
-#   Parameters(params, line) = new(params, line, MUndefined)
-# end
-
 # Function or procedure.
 mutable struct Subroutine <: Node
   name::Token
