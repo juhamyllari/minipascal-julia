@@ -82,7 +82,6 @@ end
 mutable struct AnalysisContext
   scope_stack::Stack{SymTableEntry}
   scope::Int
-  symbol_set::Set{SymTableEntry}
   subroutines::Vector{SubroutineEntry}
   in_call::Stack{Call}
   unique_calls::Vector{Call}
@@ -91,7 +90,6 @@ end
 AnalysisContext() = AnalysisContext(
       Stack{SymTableEntry}(),
       initial_scope_level,
-      Set{SymTableEntry}(),
       Vector{SubroutineEntry}(),
       Stack{Call}(),
       Vector{Call}(),
@@ -120,12 +118,14 @@ function getvariable(s::AnalysisContext, var_name)
 end
 
 function popscope!(s::AnalysisContext)
+  println("This is popscope!, scope is $(s.scope)")
   isempty(s.scope_stack) && return
-  scope = first(s.scope_stack).scope_level
-  while !isempty(s.scope_stack) && first(s.scope_stack).scope_level == scope
+  s.scope -= 1
+  println("This is popscope!, new scope is $(s.scope)")
+  while !isempty(s.scope_stack) && (first(s.scope_stack).scope_level > s.scope)
+    println("This is popscope!, popping $(first(s.scope_stack))")
     pop!(s.scope_stack)
   end
-  s.scope -= 1
 end
 
 function enterscope!(s::AnalysisContext)
@@ -135,7 +135,6 @@ end
 function pushvar!(ac::AnalysisContext, var_name::String, var_type::MPType, val_identifier::String)
   entry = SymTableEntry(var_name, var_type, val_identifier, ac.scope)
   push!(ac.scope_stack, entry)
-  push!(ac.symbol_set, entry)
 end
 
 function pushsubroutine!(ac::AnalysisContext,
@@ -216,9 +215,8 @@ function parameter_to_mptype(p::Parameter)
 end
 
 function static_analysis(s::Subroutine, ac::AnalysisContext)
-  if s.type == MPassed return end
-  s.type = MPassed
   static_analysis(s.body, ac)
+  s.type = MPassed
 end
 
 function static_analysis(c::CallStatement, ac::AnalysisContext)
@@ -228,6 +226,7 @@ function static_analysis(c::CallStatement, ac::AnalysisContext)
 end
 
 function analyze_call(c::Call, ac::AnalysisContext)
+  DEBUG && println("This is analyze_call, call is to $(c.identifier)")
   foreach(arg->typecheck(arg, ac), c.arguments)
   subroutine_entry::SubroutineEntry = getsubroutine(ac, c.identifier)
   c.subroutine = subroutine_entry.node
@@ -237,7 +236,14 @@ function analyze_call(c::Call, ac::AnalysisContext)
   for (param_name, arg) in zip(subroutine_entry.param_names, c.arguments)
     pushvar!(ac, param_name, arg.type, "")
   end
-  static_analysis(subroutine_entry.node, ac)
+  fingerprint = symbol_fingerprint(ac)
+  c.fingerprint = fingerprint
+  if fingerprint ∉ c.subroutine.fingerprints
+    println("fingerprint $fingerprint not found")
+    static_analysis(subroutine_entry.node, ac)
+    push!(c.subroutine.fingerprints, fingerprint)
+    push!(c.subroutine.implicit_param_lists, c.implicit_params)
+  end
   pop!(ac.in_call)
   popscope!(ac)
   if !isempty(ac.in_call) 
@@ -255,6 +261,11 @@ function add_call_if_unique(c::Call, ac::AnalysisContext)
   if !any(call->call.identifier == c.identifier && call.implicit_params == c.implicit_params, ac.unique_calls)
     push!(ac.unique_calls, c)
   end
+end
+
+function symbol_fingerprint(ac::AnalysisContext)
+  names_types = ["$(e.var_name)/$(e.var_type)/$(e.val_identifier)" for e in ac.scope_stack]
+  return join(names_types, "+")
 end
 
 function compare_with_signature(sr::SubroutineEntry, args::Vector{Value}, line::Int)
@@ -296,11 +307,11 @@ end
 
 function static_analysis(b::Block, ac::AnalysisContext)
   DEBUG && println("This is static analysis, analysing Block")
-  enterscope!(ac)
+  if !b.is_subroutine_block enterscope!(ac) end
   for stmt in b.statements
     static_analysis(stmt, ac)
   end
-  popscope!(ac)
+  if !b.is_subroutine_block popscope!(ac) end
   b.type = MPassed
 end
 
@@ -473,6 +484,7 @@ end
 
 function typecheck(v::VariableFactor, ac::AnalysisContext)
   DEBUG && println("This is static analysis, analysing VariableFactor")
+  DEBUG && println("in_call empty? $(isempty(ac.in_call))")
   var_name = v.identifier
   if !hasvariable(ac, var_name)
     throw(StaticAnalysisException(

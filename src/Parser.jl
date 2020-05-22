@@ -101,10 +101,11 @@ ImmediateBool(value::Bool) = ImmediateBool(value, MUndefined)
 
 mutable struct Block <: Statement
   statements::Vector{Statement}
+  is_subroutine_block::Bool
   line::Int
   type::MPType
 end
-Block(statements::Vector{Statement}, line::Int) = Block(statements, line, MUndefined)
+Block(statements::Vector{Statement}, line::Int) = Block(statements, false, line, MUndefined)
 
 mutable struct TypeOfVarOrValue <: Node
   scalar_type::MPType
@@ -155,11 +156,13 @@ mutable struct Subroutine <: Node
   params::Vector{Parameter}
   ret_type::TypeOfVarOrValue
   body::Block
+  fingerprints::Vector{String}
+  implicit_param_lists::Vector{Vector{SymTableEntry}}
   line::Int
   type::MPType
   end
 Subroutine(name, params, ret_type, body, line) =
-  Subroutine(name, params, ret_type, body, line, MUndefined) 
+  Subroutine(name, params, ret_type, body, Vector{String}(), Vector{Vector{SymTableEntry}}(), line, MUndefined) 
 
 mutable struct Definitions <: Node
   defs::Vector{Subroutine}
@@ -189,11 +192,12 @@ mutable struct CallStatement <: Statement
   implicit_params::Vector{SymTableEntry}
   subroutine::Union{Subroutine,Nothing}
   call_id::Int
+  fingerprint::String
   line::Int
   type::MPType
-  end
+end
 CallStatement(identifier, arguments, call_id, line) =
-  CallStatement(identifier, arguments, Vector{SymTableEntry}(), nothing, call_id, line, MUndefined)
+  CallStatement(identifier, arguments, Vector{SymTableEntry}(), nothing, call_id, "", line, MUndefined)
 
 mutable struct Declaration <: Statement
   var_type::TypeOfVarOrValue
@@ -350,11 +354,12 @@ mutable struct CallFactor <: Factor
   implicit_params::Vector{SymTableEntry}
   subroutine::Union{Subroutine,Nothing}
   call_id::Int
+  fingerprint::String
   line::Int
   type::MPType
 end
 CallFactor(identifier, arguments, call_id, line) =
-  CallFactor(identifier, arguments, Vector{String}(), nothing, call_id, line, MUndefined)
+  CallFactor(identifier, arguments, Vector{String}(), nothing, call_id, "", line, MUndefined)
 
 Call = Union{CallFactor,CallStatement}
 
@@ -487,7 +492,8 @@ function procedure(pc::ParsingContext)
   params = parameters(pc)
   match_term(close_paren, pc, current_unit)
   match_term(semicolon, pc, current_unit)
-  body = block(pc)
+  body::Block = block(pc)
+  body.is_subroutine_block = true
   match_term(semicolon, pc, current_unit)
   return_type = TypeOfVarOrValue(MNothing, MNothing, ImmediateInt(0), line)
   return Subroutine(name.lexeme, params, return_type, body, line)
@@ -505,7 +511,8 @@ function func(pc::ParsingContext)
   match_term(colon, pc, current_unit)
   ret_type = var_type(pc)
   match_term(semicolon, pc, current_unit)
-  body = block(pc)
+  body::Block = block(pc)
+  body.is_subroutine_block = true
   match_term(semicolon, pc, current_unit)
   return Subroutine(name.lexeme, params, ret_type, body, line)
 end

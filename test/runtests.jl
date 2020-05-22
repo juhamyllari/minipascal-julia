@@ -152,6 +152,8 @@ begin
   var x: int;
   x := 42;
   printx();
+  x := 23;
+  printx();
 end.
 """
 @testset "MiniPascal.jl" begin
@@ -159,7 +161,7 @@ end.
     io = IOBuffer()
     m.generate(prog12, io)
     code = String(take!(io))
-    println(code)
+    # println(code)
 
     filename = "out.ll"
     file = open(filename, "w")
