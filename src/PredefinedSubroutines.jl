@@ -6,11 +6,14 @@ const FALSE_STR_ID = "@false"
 const EMPTY_STR_ID = "@empty"
 
 const STRING_TYPE_ID = "%string"
+const ARRAY_TYPE_ID = "%array"
 
 const CONCAT_ID = "@concat"
 const COMB_LEN_ID = "@combined_length"
 const WRITE_BOOL_ID = "@print_bool"
 const COMP_STRS_ID = "@compare_strings"
+const GET_LENGTH_ID = "@get_length"
+const GET_ARRAY_PTR_ID = "@get_array_ptr"
 
 const write_bool = """
 define void $WRITE_BOOL_ID(i1 %a) {
@@ -64,9 +67,27 @@ define i32 $COMP_STRS_ID($STRING_TYPE_ID* %str1, $STRING_TYPE_ID* %str2) {
 }
 """
 
+const get_length = """
+define i32 $GET_LENGTH_ID($ARRAY_TYPE_ID* %arr) {
+  %len.ptr = getelementptr $ARRAY_TYPE_ID, $ARRAY_TYPE_ID* %arr, i32 0, i32 1
+  %len = load i32, i32* %len.ptr
+  ret i32 %len
+}
+"""
+
+const get_array_ptr = """
+define i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* %arr) {
+  %ptr.ptr = getelementptr $ARRAY_TYPE_ID, $ARRAY_TYPE_ID* %arr, i32 0, i32 0
+  %ptr = load i8*, i8** %ptr.ptr
+  ret i8* %ptr
+}
+"""
+
 const HELPER_FUNCTIONS = [
   write_bool,
   combined_length,
   concat,
-  compare_strings
+  compare_strings,
+  get_length,
+  get_array_ptr,
 ]

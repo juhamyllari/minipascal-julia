@@ -9,6 +9,10 @@ end
   MReal
   MBool
   MString
+  MIntArray
+  MRealArray
+  MBoolArray
+  MStringArray
   MIntRef
   MRealRef
   MBoolRef
@@ -19,27 +23,53 @@ end
   MUndefined
 end
 
-token_class_to_nonref_type = Dict(
+token_class_to_scalar_type = Dict{TokenClass,MPType}(
   kw_int => MInt,
   kw_real => MReal,
   kw_bool => MBool,
   kw_string => MString
 )
 
-token_class_to_ref_type = Dict(
+token_class_to_ref_type = Dict{TokenClass,MPType}(
   kw_int => MIntRef,
   kw_real => MRealRef,
   kw_bool => MBoolRef,
   kw_string => MStringRef
 )
 
-scalar_to_ref_type = Dict(
+scalar_to_ref_type = Dict{MPType,MPType}(
   MInt => MIntRef,
   MReal => MRealRef,
-  MBool => MBoolRef
+  MBool => MBoolRef,
+  MString => MStringRef
 )
 
+scalar_to_array_type = Dict{MPType,MPType}(
+  MInt => MIntArray,
+  MReal => MRealArray,
+  MBool => MBoolArray,
+  MString => MStringArray
+)
+
+ref_to_scalar_type = Dict(val => key for (key, val) in scalar_to_ref_type)
+
+mutable struct ImplicitParameter
+  name::String
+  type::MPType
+  unique_id::String    
+end
+
+mutable struct SymTableEntry
+  var_name::String
+  var_type::MPType
+  val_identifier::String
+  scope_level::Int
+end
+
 abstract type Node end
+# Pseudonodes are nodelike structs that assist in parsing
+# but are not included in the abstract syntax tree (AST).
+abstract type Pseudonode <: Node end
 abstract type Statement <: Node end
 abstract type Value <: Node end
 abstract type Factor <: Value end
@@ -48,86 +78,103 @@ abstract type If <: Statement end
 mutable struct ImmediateInt <: Value
   value::Int
   type::MPType
-  ImmediateInt(value) = new(value, MUndefined)
 end
+ImmediateInt(value::Int) = ImmediateInt(value, MUndefined)
 
 mutable struct ImmediateReal <: Value
   value::Float64
   type::MPType
-  ImmediateReal(value) = new(value, MUndefined)
 end
+ImmediateReal(value::Float64) = ImmediateReal(value, MUndefined)
 
 mutable struct ImmediateString <: Value
   value::String
   type::MPType
-  ImmediateString(value) = new(value, MUndefined)
 end
+ImmediateString(value::String) = ImmediateString(value, MUndefined)
 
 mutable struct ImmediateBool <: Value
   value::Bool
   type::MPType
-  ImmediateBool(value) = new(value, MUndefined)
 end
+ImmediateBool(value::Bool) = ImmediateBool(value, MUndefined)
 
 mutable struct Block <: Statement
   statements::Vector{Statement}
   line::Int
   type::MPType
-  Block(statements, line) = new(statements, line, MUndefined)
 end
+Block(statements::Vector{Statement}, line::Int) = Block(statements, line, MUndefined)
 
-mutable struct VarType <: Node
-  var_type::MPType
+mutable struct TypeOfVarOrValue <: Node
+  scalar_type::MPType
+  true_type::MPType
   size::Value
   line::Int
   type::MPType
-  VarType(var_type, size, line) = new(var_type, size, line, MUndefined) 
+end
+TypeOfVarOrValue(scalar_type::MPType, true_type::MPType, size::Value, line::Int) =
+  TypeOfVarOrValue(scalar_type, true_type, size, line, MUndefined)
+
+function is_array_type(t::TypeOfVarOrValue)
+  return t.size isa ImmediateInt && t.size.value == 1
 end
 
 mutable struct Parameter <: Node
   name::String
-  var_type::MPType
+  scalar_type::MPType
   is_var_par::Bool
   is_array::Bool
   size::Value       # Array size can only be determined at run time
   line::Int
   type::MPType
-  Parameter(name, var_type, is_var_par, is_array, size, line) =
-    new(name, var_type, is_var_par, is_array, size, line, MUndefined)
 end
+Parameter(name::String,
+  scalar_type::MPType,
+  is_var_par::Bool,
+  is_array::Bool,
+  size::Value,
+  line::Int) =
+  Parameter(name,
+    scalar_type,
+    is_var_par,
+    is_array,
+    size,
+    line,
+    MUndefined)
 
-mutable struct VarAsPar <: Value
+mutable struct VarAsArgument <: Value
   name::String
   line::Int
   type::MPType
-  VarAsPar(name, line) = new(name, line, MUndefined)
 end
 
 # Function or procedure.
 mutable struct Subroutine <: Node
-  name::Token
+  name::String
   params::Vector{Parameter}
-  ret_type::VarType
+  ret_type::TypeOfVarOrValue
   body::Block
   line::Int
   type::MPType
-  Subroutine(name, params, ret_type, body, line) = new(name, params, ret_type, body, line, MUndefined) 
-end
+  end
+Subroutine(name, params, ret_type, body, line) =
+  Subroutine(name, params, ret_type, body, line, MUndefined) 
 
 mutable struct Definitions <: Node
   defs::Vector{Subroutine}
   line::Int
   type::MPType
-  Definitions(defs, line) = new(defs, line, MUndefined)
-end
+  end
+Definitions(defs, line) = Definitions(defs, line, MUndefined)
 
 mutable struct Program <: Node
   definitions::Definitions
   main::Block
   line::Int
   type::MPType
-  Program(definitions, main, line) = new(definitions, main, line, MUndefined)
-end
+  end
+Program(definitions, main, line) = Program(definitions, main, line, MUndefined)
 
 # mutable struct Arguments <: Node
 #   arguments::Vector{Value}
@@ -137,36 +184,51 @@ end
 # end
 
 mutable struct CallStatement <: Statement
-  identifier::Token
+  identifier::String
   arguments::Vector{Value}
+  implicit_params::Vector{SymTableEntry}
+  subroutine::Union{Subroutine,Nothing}
+  call_id::Int
   line::Int
   type::MPType
-  CallStatement(identifier, arguments, line) = new(identifier, arguments, line, MUndefined)
-end
+  end
+CallStatement(identifier, arguments, call_id, line) =
+  CallStatement(identifier, arguments, Vector{SymTableEntry}(), nothing, call_id, line, MUndefined)
 
 mutable struct Declaration <: Statement
+  var_type::TypeOfVarOrValue
   names::Vector{Token}
-  var_type::VarType
+  unique_ids::Vector{String}
   line::Int
   type::MPType
-  Declaration(names, var_type, line) = new(names, var_type, line, MUndefined)
+end
+Declaration(var_type, names, line) = Declaration(var_type, names, Vector{String}(), line, MUndefined)
+
+mutable struct Variable <: Pseudonode
+  identifier::String
+  is_array_access::Bool
+  array_index::Value
 end
 
 mutable struct Assignment <: Statement
-  variable::Token
+  variable_name::String
+  var_unique_id::String
+  is_array_access::Bool
+  array_index::Value  # Array index. Can use ImmediateInt(-1) for non-array access assignments.
   value::Value
   line::Int
   type::MPType
-  Assignment(variable, value, line) = new(variable, value, line, MUndefined)
 end
+Assignment(variable_name::String, is_array_access::Bool, index::Value, value::Value, line::Int) =
+  Assignment(variable_name, "", is_array_access, index, value, line, MUndefined)
 
 mutable struct IfThen <: If
   condition::Value
   then_stmt::Statement
   line::Int
   type::MPType
-  IfThen(condition, then_stmt, line) = new(condition, then_stmt, line, MUndefined)
 end
+IfThen(condition, then_stmt, line) = IfThen(condition, then_stmt, line, MUndefined)
 
 mutable struct IfThenElse <: If
   condition::Value
@@ -174,57 +236,58 @@ mutable struct IfThenElse <: If
   else_stmt::Statement
   line::Int
   type::MPType
-  IfThenElse(condition, then_stmt, else_stmt, line) = new(condition, then_stmt, else_stmt, line, MUndefined)
 end
+IfThenElse(condition, then_stmt, else_stmt, line) = IfThenElse(condition, then_stmt, else_stmt, line, MUndefined)
 
 mutable struct While <: Statement
   condition::Value
   do_stmt::Statement
   line::Int
   type::MPType
-  While(condition, do_stmt, line) = new(condition, do_stmt, line, MUndefined)
 end
+While(condition, do_stmt, line) = While(condition, do_stmt, line, MUndefined)
 
 mutable struct Read <: Statement
   variable::Token
   line::Int
   type::MPType
 end
+Read(variable, line) = Read(variable, line, MUndefined)
 
 mutable struct Write <: Statement
   arguments::Vector{Value}
   line::Int
   type::MPType
-  Write(arguments, line) = new(arguments, line, MUndefined)
 end
+Write(arguments, line) = Write(arguments, line, MUndefined)
 
 mutable struct Assert <: Statement
   argument::Value
   line::Int
   type::MPType
-  Assert(argument, line) = new(argument, line, MUndefined)
 end
+Assert(argument, line) = Assert(argument, line, MUndefined)
 
 mutable struct Return <: Statement
   value::Value
   line::Int
   type::MPType
-  Return(value, line) = new(value, line, MUndefined)
 end
+Return(value, line) = Return(value, line, MUndefined)
 
 mutable struct Term <: Value
   factors::Array{Tuple{Factor,Token},1}
   line::Int
   type::MPType
-  Term(factors, line) = new(factors, line, MUndefined)
 end
+Term(factors, line) = Term(factors, line, MUndefined)
 
 mutable struct SimpleExpression <: Value
   terms::Array{Tuple{Term,Token},1}
   line::Int
   type::MPType
-  SimpleExpression(terms, line) = new(terms, line, MUndefined)
 end
+SimpleExpression(terms, line) = SimpleExpression(terms, line, MUndefined)
 
 mutable struct RelationalExpression <: Value
   left::SimpleExpression
@@ -232,61 +295,68 @@ mutable struct RelationalExpression <: Value
   operation::Token
   line::Int
   type::MPType
-  RelationalExpression(left, right, operation, line) =
-    new(left, right, operation, line, MUndefined)
 end
+RelationalExpression(left, right, operation, line) =
+  RelationalExpression(left, right, operation, line, MUndefined)
 
 mutable struct SizeFactor <: Factor
   array::Factor
   line::Int
   type::MPType
-  SizeFactor(array, line) = new(array, line, MUndefined)
-end
+  end
+SizeFactor(array, line) = SizeFactor(array, line, MUndefined)
 
 mutable struct NotFactor <: Factor
   argument::Factor
   line::Int
   type::MPType
-  NotFactor(argument, line) = new(argument, line, MUndefined)
 end
+NotFactor(argument, line) = NotFactor(argument, line, MUndefined)
 
 mutable struct ParenFactor <: Factor
   expression::Value
   line::Int
   type::MPType
-  ParenFactor(expression, line) = new(expression, line, MUndefined)
 end
+ParenFactor(expression, line) = ParenFactor(expression, line, MUndefined)
 
 mutable struct LiteralFactor <: Factor
   token::Token
   unique_id::String  # Used to declare string literals
   line::Int
   type::MPType
-  LiteralFactor(token, index, line) = new(token, index, line, MUndefined)
 end
+LiteralFactor(token, index, line) = LiteralFactor(token, index, line, MUndefined)
 
 mutable struct VariableFactor <: Factor
-  identifier::Token
+  identifier::String
+  variable_entry::Union{SymTableEntry,Nothing}
   line::Int
   type::MPType
-  VariableFactor(identifier, line) = new(identifier, line, MUndefined)
 end
+VariableFactor(identifier::String, line::Int) = VariableFactor(identifier, nothing, line, MUndefined)
 
 mutable struct ArrayAccessFactor <: Factor
-  identifier::Token
+  identifier::String
   index::Expr
   line::Int
   type::MPType
-  ArrayAccessFactor(identifier, index, line) = new(identifier, index, line, MUndefined)
 end
+ArrayAccessFactor(identifier, index, line) = ArrayAccessFactor(identifier, index, line, MUndefined)
 
 mutable struct CallFactor <: Factor
-  identifier::Token
+  identifier::String
   arguments::Vector{Value}
+  implicit_params::Vector{SymTableEntry}
+  subroutine::Union{Subroutine,Nothing}
+  call_id::Int
   line::Int
   type::MPType
-  CallFactor(identifier, arguments, line) = new(identifier, arguments, line, MUndefined)
 end
+CallFactor(identifier, arguments, call_id, line) =
+  CallFactor(identifier, arguments, Vector{String}(), nothing, call_id, line, MUndefined)
+
+Call = Union{CallFactor,CallStatement}
 
 relational_operators = [
   equals,
@@ -323,7 +393,15 @@ mutable struct ParsingContext
   index::Int
   signatures::Vector{Subroutine}
   string_literals::Vector{LiteralFactor}
-  ParsingContext(tokens) = new(tokens, 1, Vector{Subroutine}(), Vector{LiteralFactor}())
+  id_counter::Int
+end
+ParsingContext(tokens::Vector{Token}) =
+  ParsingContext(tokens, 1, Vector{Subroutine}(), Vector{LiteralFactor}(), 0)
+
+function create_node_id(pc::ParsingContext)
+  id = pc.id_counter
+  pc.id_counter += 1
+  return id
 end
 
 function next_token(pc::ParsingContext)
@@ -411,8 +489,8 @@ function procedure(pc::ParsingContext)
   match_term(semicolon, pc, current_unit)
   body = block(pc)
   match_term(semicolon, pc, current_unit)
-  return_type = VarType(MNothing, ImmediateInt(0), line)
-  return Subroutine(name, params, return_type, body, line)
+  return_type = TypeOfVarOrValue(MNothing, MNothing, ImmediateInt(0), line)
+  return Subroutine(name.lexeme, params, return_type, body, line)
 end
 
 function func(pc::ParsingContext)
@@ -429,7 +507,7 @@ function func(pc::ParsingContext)
   match_term(semicolon, pc, current_unit)
   body = block(pc)
   match_term(semicolon, pc, current_unit)
-  return Subroutine(name, params, ret_type, body, line)
+  return Subroutine(name.lexeme, params, ret_type, body, line)
 end
 
 function parameters(pc::ParsingContext)
@@ -483,7 +561,7 @@ function block(pc::ParsingContext)
   token, class, line = token_class_line(pc)
   DEBUG && println("this is $(current_unit), next is ", token)
   match_term(kw_begin, pc, current_unit)
-  stmts = Vector{Node}()
+  stmts = Vector{Statement}()
   while nextclass(pc) != kw_end
     push!(stmts, statement(pc))
     if nextclass(pc) == semicolon
@@ -532,7 +610,7 @@ function var_declaration(pc::ParsingContext)
   end
   match_term(colon, pc, current_unit)
   v_type = var_type(pc)
-  return Declaration(names, v_type, line)
+  return Declaration(v_type, names, line)
 end
 
 function simple_statement(pc::ParsingContext)
@@ -579,10 +657,10 @@ end
 function assignment(pc::ParsingContext)
   current_unit = "assignment"
   token, class, line = token_class_line(pc)
-  match_term(identifier, pc, current_unit)
+  var::Variable = variable(pc)
   match_term(assign, pc, current_unit)
   value = expr(pc)
-  return Assignment(token, value, line)
+  return Assignment(var.identifier, var.is_array_access, var.array_index, value, line)
 end
 
 # A function or procedure call as a statement.
@@ -594,7 +672,7 @@ function call_statement(pc::ParsingContext)
   match_term(open_paren, pc, current_unit)
   args = arguments(pc, token.lexeme)
   match_term(close_paren, pc, current_unit)
-  return CallStatement(token, args, line)
+  return CallStatement(token.lexeme, args, create_node_id(pc), line)
 end
 
 function write_statement(pc::ParsingContext)
@@ -638,7 +716,7 @@ function arguments(pc::ParsingContext, subroutine_name::String)
   current_unit = "arguments"
   token, class, line = token_class_line(pc)
   DEBUG && println("this is $(current_unit), next is ", token)
-  subroutine = getfirst(sr -> sr.name.lexeme == subroutine_name, pc.signatures)
+  subroutine = getfirst(sr -> sr.name == subroutine_name, pc.signatures)
   if subroutine === nothing  # No signature found for subroutine
     if subroutine_name ∈ ["read", "writeln"]
       return read_writeln_args(pc, subroutine_name)
@@ -651,7 +729,7 @@ function arguments(pc::ParsingContext, subroutine_name::String)
   args = Vector{Value}()
   for parameter::Parameter in parameters
     if parameter.is_var_par
-      push!(args, var_as_par(pc))
+      push!(args, var_as_arg(pc))
     else
       push!(args, expr(pc))
     end
@@ -765,23 +843,35 @@ function call_factor(pc::ParsingContext)
   match_term(open_paren, pc, current_unit)
   args = arguments(pc, id.lexeme)
   match_term(close_paren, pc, current_unit)
-  return CallFactor(id, args, line)
+  return CallFactor(id.lexeme, args, create_node_id(pc), line)
+end
+
+function variable(pc::ParsingContext)
+  current_unit = "variable"
+  token, class, line = token_class_line(pc)
+  id = token
+  match_term(identifier, pc, current_unit)
+  token, class, _ = token_class_line(pc)
+  idx = ImmediateInt(-1)
+  is_array_access = false
+  if class == open_sqr_bracket
+    is_array_access = true
+    match_term(open_sqr_bracket, pc, current_unit)
+    idx = expr(pc)
+    match_term(close_sqr_bracket, pc, current_unit)
+  end
+  return Variable(id.lexeme, is_array_access, idx)
 end
 
 function variable_factor(pc::ParsingContext)
   current_unit = "variable_factor"
   token, class, line = token_class_line(pc)
   DEBUG && println("this is $(current_unit), next is ", token)
-  id = token
-  match_term(identifier, pc, current_unit)
-  token, class, _ = token_class_line(pc)
-  if class == open_sqr_bracket
-    match_term(open_sqr_bracket, pc, current_unit)
-    idx = expr(pc)
-    match_term(close_sqr_bracket, pc, current_unit)
-    return ArrayAccessFactor(id, idx, line)
+  var::Variable = variable(pc)
+  if var.is_array_access
+    return ArrayAccessFactor(var.identifier, var.array_index, line)
   end
-  return VariableFactor(id, line)
+  return VariableFactor(var.identifier, line)
 end
 
 # A boolean negation ("not") factor 
@@ -827,18 +917,18 @@ function var_type(pc::ParsingContext)
     match_term(kw_of, pc, current_unit)
     s_type = next_token(pc)
     match_term(identifier, pc, current_unit)
-    return VarType(token_class_to_ref_type[s_type.class], len, line)
+    return TypeOfVarOrValue(token_class_to_scalar_type[s_type.class], scalar_to_array_type[s_type.class], len, line)
   end
   match_term(class, pc, current_unit)
-  return VarType(token_class_to_nonref_type[class], ImmediateInt(0), line)
+  return TypeOfVarOrValue(token_class_to_scalar_type[class], token_class_to_scalar_type[class], ImmediateInt(0), line)
 end
 
-function var_as_par(pc::ParsingContext)
+function var_as_arg(pc::ParsingContext)
   current_unit = "var_as_par"
   token, class, line = token_class_line(pc)
   DEBUG && println("this is $(current_unit), next is ", token)
   match_term(identifier, pc, current_unit)
-  return VarAsPar(token.lexeme, line)
+  return VarAsArgument(token.lexeme, line)
 end
 
 # parse_input(source::String) = parse_input(scan_input(source))

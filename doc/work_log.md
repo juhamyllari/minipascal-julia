@@ -20,6 +20,11 @@
 14.5. 5h  Variables, functions
 15.5. 5h  Variables, functions, strings
 16.5. 9h  Strings, if statement, while statement
-17.5. ?h  Refactoring
+17.5. 8h  Refactoring, implicit and var parameters
+18.5. 2h  Refactoring
+19.5. 1h  Refactoring
+20.5. 2h  Implicit parameters
+21.5. 6h  Implicit parameters
+22.5. ?h  Implicit parameters, var parameters
 
 TOTAL ?h

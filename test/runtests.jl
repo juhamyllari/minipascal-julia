@@ -143,8 +143,15 @@ end.
 const prog12 = """
 program foo;
 
+procedure printx();
 begin
-  writeln("A" + "B" + "C" = "AB"+"C");
+  writeln(x);
+end;
+
+begin
+  var x: int;
+  x := 42;
+  printx();
 end.
 """
 @testset "MiniPascal.jl" begin
@@ -160,8 +167,4 @@ end.
     close(file)
     run(`lli $(filename)`)
 
-    # parsed = m.parseInput(prog3)
-    # print(parsed)
-    # m.static_analysis(parsed)
-    # print(parsed)
 end

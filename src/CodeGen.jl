@@ -19,8 +19,8 @@ mult_op_and_type_to_opcode = Dict{Tuple{TokenClass,MPType},String}(
 )
 
 mptype_to_llvm_type = Dict{MPType,String}(
-  MInt => "i64",
-  MIntRef => "i64*",
+  MInt => "i32",
+  MIntRef => "i32*",
   MReal => "double",
   MRealRef => "double*",
   MBool => "i1",
@@ -53,9 +53,20 @@ op_and_type_to_cond = Dict{Tuple{TokenClass,MPType},String}(
 
 mutable struct GenerationContext
   counter::Int
-  symtable::SymbolTable
+  symtable::Dict{String,String}
+  subroutines::Vector{SubroutineEntry}
+  calls::Vector{Call}
   string_literals::Vector{LiteralFactor}
   io
+end
+
+function GenerationContext(symbol_set::Set{SymTableEntry},
+    subroutines::Vector{SubroutineEntry},
+    calls::Vector{Call},
+    string_literals::Vector{LiteralFactor},
+    io)
+  symtable = Dict{String,String}(entry.val_identifier => "" for entry in symbol_set)
+  GenerationContext(0, symtable, subroutines, calls, string_literals, io)
 end
 
 function create_id(gc::GenerationContext, str::String)
@@ -70,13 +81,9 @@ end
 
 hasvariable(gc::GenerationContext, var_name::String) = hasvariable(gc.symtable, var_name)
 getvariable(gc::GenerationContext, var_name::String) = getvariable(gc.symtable, var_name)
-pushvar!(gc::GenerationContext, var_name::String, var_type::MPType, val_identifier::String) =
-  pushvar!(gc.symtable, var_name::String, var_type::MPType, val_identifier::String)
-getsubroutine(gc::GenerationContext, name::String) = getsubroutine(gc.symtable, name)
+getsubroutine(gc::GenerationContext, name::String) = getsubroutine(gc.subroutines, name)
 pushsubroutine!(gc::GenerationContext, name::String, arg_types::Vector{MPType}, return_type::MPType) =
   pushsubroutine!(gc.symtable, name::String, arg_types::Vector{MPType}, return_type::MPType)
-enterscope!(gc::GenerationContext) = enterscope!(gc.symtable)
-popscope!(gc::GenerationContext) = popscope!(gc.symtable)
 
 function pt(gc::GenerationContext, str, indent)
   print(gc.io, '\t'^indent * str)
@@ -85,8 +92,6 @@ end
 pt(gc, str) = pt(gc, str, 0)
 ptln(gc, str, indent) = pt(gc, str * '\n', indent)
 ptln(gc, str) = ptln(gc, str, 0)
-
-generate(program::String) = generate(program::String, IOBuffer())
 
 function generate_header(gc::GenerationContext)
   ptln(gc, "")
@@ -112,6 +117,43 @@ function generate_string_literals(gc::GenerationContext)
   end
 end
 
+function generate_subroutines(gc::GenerationContext)
+  println("this is generate_subroutines. Calls contain ", gc.calls)
+  for call::Call in gc.calls
+    println("calling generate_subroutine for subr $(identifier)")
+    # generate_subroutine(call.subroutine, call.implicit_params, gc)
+    generate_subroutine(call, gc)
+  end
+end
+
+function generate_subroutine(call::Call, gc::GenerationContext)
+  subroutine::Subroutine = call.subroutine
+  llvm_ret_type = mptype_to_llvm_type[subroutine.ret_type.scalar_type]
+  args = Vector{String}()
+  for param::Parameter in subroutine.params
+    true_type = (param.is_var_par || param.is_array) ? scalar_to_ref_type[param.var_type] : param.var_type
+    push!(args, "$(mptype_to_llvm_type[true_type]) %$(param.name)")
+  end
+  for entry::SymTableEntry in call.implicit_params
+    as_reftype = scalar_to_ref_type[entry.var_type]
+    push!(args, "$(mptype_to_llvm_type[as_reftype]) $(entry.val_identifier)")
+  end
+  argstring = join(args, ", ")
+  # name = "_$(subroutine.name.lexeme)_$(call.call_id)"
+  name = get_llvm_function_name(subroutine.name, call.call_id)
+  ptln(gc, "define $llvm_ret_type $(name)($argstring) {")
+  generate(subroutine.body, gc)
+  println("sr has ret_type ", subroutine.ret_type)
+  if subroutine.ret_type.scalar_type == MNothing  # Subroutine is a procedure
+    ptln(gc, "ret void", 1)
+  end
+  ptln(gc, "}")
+end
+
+function get_llvm_function_name(subroutine_name::String, call_id::Int)
+  return "@_$(subroutine_name)$(call_id)"
+end
+
 function generate_footer(gc::GenerationContext)
   ptln(gc, "ret i32 0", 1) # Main returns 0
   ptln(gc, "}\n") # Close main
@@ -126,6 +168,8 @@ end
 
 function generate_types(gc)
   ptln(gc, "$STRING_TYPE_ID = type { i8*, i32 }")
+  ptln(gc, "$ARRAY_TYPE_ID = type { i8*, i32 }")
+  ptln(gc, "")
 end
 
 function generate_helpers(gc)
@@ -134,77 +178,52 @@ function generate_helpers(gc)
   end
 end
 
+generate(program::String) = generate(program::String, IOBuffer())
+
 function generate(program::String, io)
   token_sequence = scan_input(program)
   DEBUG && println("scanning finished")
   pc = ParsingContext(token_sequence)
   AST::Program = parse_input(token_sequence, pc)
   DEBUG && println("parsing finished")
-  static_analysis(AST)
+  ac = AnalysisContext()
+  static_analysis(AST, ac)
   DEBUG && println("static analysis finished")
-  gc = GenerationContext(0, SymbolTable(), pc.string_literals, io)
+  DEBUG && println("symbol set contains ", ac.symbol_set)
+  DEBUG && println("subroutines vector contains ", ac.subroutines)
+  DEBUG && println("unique calls contain ", ac.unique_calls)
+  gc = GenerationContext(ac.symbol_set, ac.subroutines, ac.unique_calls, pc.string_literals, io)
   generate(AST, gc)
   DEBUG && println("codegen finished")
   reset_id_counter(gc)
 end
 
 function generate(AST::Program, gc::GenerationContext)
-  st = SymbolTable()
+  st = AnalysisContext()
   generate_strings(gc)
   generate_types(gc)
-  generate(AST.definitions, gc)
+  generate_subroutines(gc)
   add_predefined_names(gc)
   generate_header(gc)
   generate(AST.main, gc)
   generate_footer(gc)
-  ptln(gc, "")
 end
 
 function add_predefined_names(gc::GenerationContext)
   # not implemented yet
 end
 
-function generate(d::Definitions, gc::GenerationContext)
-  for subroutine in d.defs
-    generate(subroutine, gc)
-  end
-end
-
-function generate(s::Subroutine, gc::GenerationContext)
-  ret_type = s.ret_type.var_type
-  llvm_ret_type = mptype_to_llvm_type[ret_type]
-  params = s.params.params
-  println("this is generate subr, params is $params")
-  args = Vector{String}()
-  for param::Parameter in params
-    true_type = (param.is_var_par || param.is_array) ? scalar_to_ref_type[param.var_type] : param.var_type
-    pushvar!(gc, param.name, param.var_type, "%$(param.name)")
-    push!(args, "$(mptype_to_llvm_type[true_type]) %$(param.name)")
-  end
-  argstring = join(args, ", ")
-  ptln(gc, "define $llvm_ret_type @$(s.name.lexeme)($argstring) {")
-  generate(s.body, gc)
-  if ret_type == MNothing
-    ptln(gc, "ret void", 1)
-  end
-  ptln(gc, "}")
-  pushsubroutine!(gc, s.name.lexeme, Vector{MPType}(), s.ret_type.var_type)
-end
-
 function generate(b::Block, gc::GenerationContext)
-  enterscope!(gc)
   for statement in b.statements
     generate(statement, gc)
   end
-  popscope!(gc)
 end
 
-function generate(d::Declaration, gc::GenerationContext)
-  llvm_type = mptype_to_llvm_type[d.var_type.var_type]
-  for name in d.names
-    llvm_name = create_id(gc, "alloc")
-    ptln(gc, "$llvm_name = alloca $llvm_type", 1)
-    pushvar!(gc, name.lexeme, d.var_type.var_type, llvm_name)
+function generate(d::Declaration, gc)
+  mptype = d.var_type.true_type
+  llvm_type = mptype_to_llvm_type[mptype]
+  for id in d.unique_ids
+    ptln(gc, "$id = alloca $(llvm_type)", 1)
   end
 end
 
@@ -249,13 +268,38 @@ function generate(w::While, gc::GenerationContext)
 end
 
 function generate(c::CallStatement, gc::GenerationContext)
-  subroutine::SubroutineEntry = getsubroutine(gc, c.identifier.lexeme)
-  println("this is generate CallStatement, args are $(c.arguments)")
-  arg_ids = [generate(arg, gc) for arg in c.arguments]
-  arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments]
+  generate_call(c, gc)
+  return
+end
+
+function generate(c::CallFactor, gc::GenerationContext)
+  generate_call(c, gc)
+end
+
+function generate_call(c::Call, gc::GenerationContext)
+  println("This is generate_call. Call is to $(c.identifier)")
+  subroutine::SubroutineEntry = getsubroutine(gc, c.identifier)
+  
+  explicit_arg_ids = [generate(arg, gc) for arg in c.arguments]
+  explicit_arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments ]
+
+  implicit_arg_ids = [param.val_identifier for param in c.implicit_params]
+  implicit_arg_types = [mptype_to_llvm_type[scalar_to_ref_type[param.var_type]] for param in c.implicit_params]
+
+  arg_ids = [explicit_arg_ids; implicit_arg_ids]
+  arg_types = [explicit_arg_types; implicit_arg_types]
+
   arg_strs = ["$type $id" for (type, id) in zip(arg_types, arg_ids)]
   arg_string = join(arg_strs,  ", ")
-  ptln(gc, "call void @$(subroutine.name)($arg_string)", 1)
+  ret_id = create_id(gc, "ret")
+  llvm_ret_type = mptype_to_llvm_type[subroutine.return_type]
+  llvm_function_name = get_llvm_function_name(subroutine.name, c.call_id)
+  if subroutine.return_type == MNothing  # Subroutine is a procedure
+    ptln(gc, "call $llvm_ret_type $(llvm_function_name)($arg_string)", 1)
+  else
+    ptln(gc, "$ret_id = call $llvm_ret_type $(llvm_function_name)($arg_string)", 1)
+  end
+  return ret_id
 end
 
 function generate(r::Return, gc::GenerationContext)
@@ -267,8 +311,7 @@ end
 function generate(a::Assignment, gc::GenerationContext)
   value_llvm_type = mptype_to_llvm_type[a.value.type]
   value_id = generate(a.value, gc)
-  entry::StackEntry = getvariable(gc, a.variable.lexeme)
-  variable_pointer = entry.val_identifier
+  variable_pointer = a.var_unique_id
   ptln(gc, "store $value_llvm_type $value_id, $value_llvm_type* $variable_pointer", 1)
 end
 
@@ -293,8 +336,8 @@ function generate(p::Write, gc::GenerationContext)
   ptln(gc, "call i32 @puts(i8* getelementptr inbounds ([1 x i8], [1 x i8]* $EMPTY_STR_ID, i32 0, i32 0))", 1)
 end
 
-function generate(v::VarAsPar, gc::GenerationContext)
-  variable::StackEntry = getvariable(gc, v.name)
+function generate(v::VarAsArgument, gc::GenerationContext)
+  variable::SymTableEntry = getvariable(gc, v.name)
   println("this is generate VarAsPar, variable is $variable")
   return variable.val_identifier
 end
@@ -306,7 +349,7 @@ function generate(s::SimpleExpression, gc::GenerationContext)
   if ret_type == MInt
     signed_id = create_id(gc, "signed_int")
     sign_op = (s.terms[1][2].class == plus ? "add" : "sub")
-    ptln(gc, "$(signed_id) = $(sign_op) i64 0, $(ret_id)", 1)
+    ptln(gc, "$(signed_id) = $(sign_op) i32 0, $(ret_id)", 1)
     ret_id = signed_id
   elseif ret_type == MReal
     signed_id = create_id(gc, "signed_real")
@@ -377,7 +420,7 @@ function generate(l::LiteralFactor, gc::GenerationContext)
   ret_id = ""
   if l.type == MInt
     ret_id = create_id(gc, "int_lit")
-    ptln(gc, "$(ret_id) = add i64 0, $(l.token.lexeme) ", 1)
+    ptln(gc, "$(ret_id) = add i32 0, $(l.token.lexeme) ", 1)
   elseif l.type == MBool
     ret_id = create_id(gc, "bool_lit")
     if l.token.class == kw_true
@@ -412,10 +455,27 @@ end
 
 function generate(v::VariableFactor, gc::GenerationContext)
   llvm_type = mptype_to_llvm_type[v.type]
-  entry = getvariable(gc, v.identifier.lexeme)
+  entry::SymTableEntry = v.variable_entry
   ret_id = create_id(gc, "var_val")
   ptln(gc, "$ret_id = load $llvm_type, $llvm_type* $(entry.val_identifier)", 1)
   return ret_id
+end
+
+function generate(a::ArrayAccessFactor, gc::GenerationContext)
+  variable_entry::SymTableEntry = getvariable(gc, a.identifier.lexeme)
+  val_id = variable_entry.val_identifier
+  scalar_type = ref_to_scalar_type[variable_entry.var_type]
+  llvm_type = mptype_to_llvm_type[scalar_type]
+  index_id = generate(a.index, gc)
+  arr_ptr_id = create_id(gc, "arr_ptr")
+  val_ptr_id = create_id(gc, "val_ptr")
+  ret_id = create_id(gc, "array_el")
+  len_id = create_id(gc, "array_len_ptr")
+  ptln(gc, "$len_id = call i32 $GET_LENGTH_ID($ARRAY_TYPE_ID* $val_id)", 1)
+  # TODO: runtime array bounds checking
+  ptln(gc, "$arr_ptr_id = call i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* $val_id)", 1)
+  ptln(gc, "$val_ptr_id = getelementptr $llvm_type, $llvm_type* bitcast (i8* $arr_ptr_id to $llvm_type), i32 0, i32 $index_id", 1)
+  ptln(gc, "$ret_id = load $llvm_type, $llvm_type* $val_ptr_id", 1)
 end
 
 function generate(n::NotFactor, gc::GenerationContext)
@@ -425,15 +485,4 @@ function generate(n::NotFactor, gc::GenerationContext)
   return ret_id
 end
 
-function generate(c::CallFactor, gc::GenerationContext)
-  println("this is generate CallFactor, sr id lex is $(c.identifier.lexeme)")
-  subroutine::SubroutineEntry = getsubroutine(gc, c.identifier.lexeme)
-  arg_ids = [generate(arg, gc) for arg in c.arguments]
-  arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments ]
-  arg_strs = ["$type $id" for (type, id) in zip(arg_types, arg_ids)]
-  arg_string = join(arg_strs,  ", ")
-  ret_id = create_id(gc, "ret")
-  llvm_ret_type = mptype_to_llvm_type[subroutine.return_type]
-  ptln(gc, "$ret_id = call $llvm_ret_type @$(subroutine.name)($arg_string)", 1)
-  return ret_id
-end
+
