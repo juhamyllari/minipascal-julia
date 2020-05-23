@@ -606,5 +606,5 @@ function typecheck(s::SizeFactor, ac::AnalysisContext)
 end
 
 function get_llvm_function_name(subroutine_name::String, call_id::Int)
-  return "@_$(subroutine_name)$(call_id)"
+  return "@$(subroutine_name).$(call_id)"
 end

@@ -348,15 +348,13 @@ function generate(s::SimpleExpression, gc::GenerationContext)
   ret_type = s.terms[1][1].type
   llvm_type = mptype_to_llvm_type[ret_type]
   ret_id = generate(s.terms[1][1], gc)
-  if ret_type == MInt
-    signed_id = create_id(gc, "signed_int")
-    sign_op = (s.terms[1][2].class == plus ? "add" : "sub")
-    ptln(gc, "$(signed_id) = $(sign_op) i32 0, $(ret_id)", 1)
+  if ret_type == MInt && s.terms[1][2].class == minus
+    signed_id = create_id(gc, "negated_int")
+    ptln(gc, "$(signed_id) = sub i32 0, $(ret_id)", 1)
     ret_id = signed_id
-  elseif ret_type == MReal
-    signed_id = create_id(gc, "signed_real")
-    sign_op = (s.terms[1][2].class == plus ? "fadd" : "fsub")
-    ptln(gc, "$(signed_id) = $(sign_op) double 0.0, $(ret_id)", 1)
+  elseif ret_type == MReal && s.terms[1][2].class == minus
+    signed_id = create_id(gc, "negated_real")
+    ptln(gc, "$(signed_id) = fsub double 0.0, $(ret_id)", 1)
     ret_id = signed_id
   end
   if length(s.terms) > 1
@@ -420,19 +418,8 @@ end
 
 function generate(l::LiteralFactor, gc::GenerationContext)
   ret_id = ""
-  if l.type == MInt
-    ret_id = create_id(gc, "int_lit")
-    ptln(gc, "$(ret_id) = add i32 0, $(l.token.lexeme) ", 1)
-  elseif l.type == MBool
-    ret_id = create_id(gc, "bool_lit")
-    if l.token.class == kw_true
-      ptln(gc, "$(ret_id) = or i1 1, 1 ", 1)
-    else
-      ptln(gc, "$(ret_id) = and i1 0, 0 ", 1)
-    end
-  elseif l.type == MReal
-    ret_id = create_id(gc, "real_lit")
-    ptln(gc, "$(ret_id) = fadd double 0.0, $(l.token.lexeme) ", 1)
+  if l.type ∈ [MInt, MReal, MBool]
+    return l.token.lexeme
   elseif l.type == MString
     ret_id = create_id(gc, "str_lit")
     str_len = length(l.token.lexeme) + 1  # Account for terminating null
@@ -446,7 +433,7 @@ function generate(l::LiteralFactor, gc::GenerationContext)
     ptln(gc, "$str_len_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $ret_id, i32 0, i32 1", 1)
     ptln(gc, "store i32 $(str_len), i32* $str_len_ptr_id", 1)
   else
-    println("codegen for non-int literals not implemented yet")
+    println("codegen for arrays not implemented")
   end
   return ret_id
 end

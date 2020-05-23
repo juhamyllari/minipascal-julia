@@ -166,10 +166,23 @@ begin
   printx();
 end.
 """
+
+const prog13 = """
+program foo;
+
+begin
+  var x: real;
+  x := 23.0;
+  if (x > 0.0) and true
+  then writeln(2.0*x)
+  else writeln(x);
+end.
+"""
+
 @testset "MiniPascal.jl" begin
     # Write your own tests here.
     io = IOBuffer()
-    m.generate(prog12, io)
+    m.generate(prog13, io)
     code = String(take!(io))
     # println(code)
 
