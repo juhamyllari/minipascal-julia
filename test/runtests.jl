@@ -148,11 +148,21 @@ begin
   writeln(x);
 end;
 
+procedure increment(var z:int);
+begin
+  z := z+1;
+end;
+
 begin
   var x: int;
   x := 42;
   printx();
-  x := 23;
+  begin
+    var x:int;
+    x := 22;
+    increment(x);
+    printx();
+  end;
   printx();
 end.
 """

@@ -54,6 +54,7 @@ op_and_type_to_cond = Dict{Tuple{TokenClass,MPType},String}(
 mutable struct GenerationContext
   counter::Int
   subroutines::Vector{SubroutineEntry}
+  generated_subrs::Dict{String,String}
   calls::Vector{Call}
   string_literals::Vector{LiteralFactor}
   io
@@ -64,7 +65,7 @@ function GenerationContext(
     calls::Vector{Call},
     string_literals::Vector{LiteralFactor},
     io)
-  GenerationContext(0, subroutines, calls, string_literals, io)
+  GenerationContext(0, subroutines, Dict{String,String}(), calls, string_literals, io)
 end
 
 function create_id(gc::GenerationContext, str::String)
@@ -92,7 +93,6 @@ ptln(gc, str, indent) = pt(gc, str * '\n', indent)
 ptln(gc, str) = ptln(gc, str, 0)
 
 function generate_header(gc::GenerationContext)
-  ptln(gc, "")
   ptln(gc, "define i32 @main(i32, i8**) {")
 end
 
@@ -116,47 +116,40 @@ function generate_string_literals(gc::GenerationContext)
 end
 
 function generate_subroutines(gc::GenerationContext)
-  for call::Call in gc.calls
-    println("calling generate_subroutine for subr $(call.identifier). Its implicit params are $(call.implicit_params)")
-    generate_subroutine(call, gc)
+  for entry::SubroutineEntry in gc.subroutines
+    subroutine::Subroutine = entry.node
+    generate(subroutine, gc)
   end
 end
 
-function generate_subroutine(call::Call, gc::GenerationContext)
-  subroutine::Subroutine = call.subroutine
-  llvm_ret_type = mptype_to_llvm_type[subroutine.ret_type.scalar_type]
-  args = Vector{String}()
-  for param::Parameter in subroutine.params
-    true_type = (param.is_var_par || param.is_array) ? scalar_to_ref_type[param.var_type] : param.var_type
-    push!(args, "$(mptype_to_llvm_type[true_type]) %$(param.name)")
+function generate(s::Subroutine, gc::GenerationContext)
+  for fingerprint in keys(s.fingerprint_to_implicits_and_f_id)
+    implicits, llvm_function_name = s.fingerprint_to_implicits_and_f_id[fingerprint]
+    generate_subroutine(s, implicits, llvm_function_name, gc)
   end
+end
 
-  # CallFactor
-  fingerprint = call.fingerprint
-  println("this is generate_subroutine, call fingerprint is $(fingerprint)")
-  println("this is generate_subroutine, subr fingerprints are $(subroutine.fingerprints)")
-  index_of_fingerprint = findfirst(fp->fp==fingerprint, subroutine.fingerprints)
-  implicit_params = subroutine.implicit_param_lists[index_of_fingerprint]
-  println("this is generate_subroutine, implicit params are $(implicit_params)")
-
-  # for entry::SymTableEntry in call.implicit_params
-  for entry::SymTableEntry in implicit_params
+function generate_subroutine(s::Subroutine, implicits::Vector{SymTableEntry}, llvm_function_name::String, gc::GenerationContext)
+  llvm_ret_type = mptype_to_llvm_type[s.ret_type.scalar_type]
+  args = ["$(mptype_to_llvm_type[parameter_to_mptype(param)]) %$(param.name)" for param in s.params]
+  for entry::SymTableEntry in implicits
     as_reftype = scalar_to_ref_type[entry.var_type]
-    push!(args, "$(mptype_to_llvm_type[as_reftype]) $(entry.val_identifier)")
+    push!(args, "$(mptype_to_llvm_type[as_reftype]) %$(entry.var_name)")
   end
   argstring = join(args, ", ")
-  name = get_llvm_function_name(subroutine.name, call.call_id)
-  ptln(gc, "define $llvm_ret_type $(name)($argstring) {")
-  generate(subroutine.body, gc)
-  println("sr has ret_type ", subroutine.ret_type)
-  if subroutine.ret_type.scalar_type == MNothing  # Subroutine is a procedure
-    ptln(gc, "ret void", 1)
+  subroutine_fingerprint = get_subroutine_fingerprint(s, implicits)
+  if subroutine_fingerprint ∉ keys(gc.generated_subrs)
+    signature_string = "$llvm_ret_type $(llvm_function_name)($argstring)"
+    # push!(gc.generated_subrs, subroutine_fingerprint)
+    gc.generated_subrs[subroutine_fingerprint] = llvm_function_name
+    ptln(gc, "define $signature_string {")
+    generate(s.body, gc)
+    if s.ret_type.scalar_type == MNothing  # Subroutine is a procedure
+      ptln(gc, "ret void", 1)
+    end
+    ptln(gc, "}")
+    ptln(gc, "")
   end
-  ptln(gc, "}")
-end
-
-function get_llvm_function_name(subroutine_name::String, call_id::Int)
-  return "@_$(subroutine_name)$(call_id)"
 end
 
 function generate_footer(gc::GenerationContext)
@@ -282,15 +275,14 @@ end
 
 function generate_call(c::Call, gc::GenerationContext)
   println("This is generate_call. Call is to $(c.identifier)")
+  println("This is generate_call. Args are $(c.arguments)")
   subroutine::Subroutine = c.subroutine
   ret_type = subroutine.ret_type.true_type
   
   explicit_arg_ids = [generate(arg, gc) for arg in c.arguments]
   explicit_arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments ]
 
-  fingerprint = c.fingerprint
-  index_of_fingerprint = findfirst(fp->fp==fingerprint, subroutine.fingerprints)
-  implicit_params = subroutine.implicit_param_lists[index_of_fingerprint]
+  implicit_params, _ = subroutine.fingerprint_to_implicits_and_f_id[c.fingerprint]
 
   implicit_arg_ids = [param.val_identifier for param in implicit_params]
   implicit_arg_types = [mptype_to_llvm_type[scalar_to_ref_type[param.var_type]] for param in implicit_params]
@@ -300,9 +292,12 @@ function generate_call(c::Call, gc::GenerationContext)
 
   arg_strs = ["$type $id" for (type, id) in zip(arg_types, arg_ids)]
   arg_string = join(arg_strs,  ", ")
+
+  subroutine_fingerprint = get_subroutine_fingerprint(subroutine, implicit_params)
+  llvm_function_name = gc.generated_subrs[subroutine_fingerprint]
+
   ret_id = create_id(gc, "ret")
   llvm_ret_type = mptype_to_llvm_type[ret_type]
-  llvm_function_name = get_llvm_function_name(subroutine.name, c.call_id)
   if ret_type == MNothing  # Subroutine is a procedure
     ptln(gc, "call $llvm_ret_type $(llvm_function_name)($arg_string)", 1)
   else
@@ -346,9 +341,7 @@ function generate(p::Write, gc::GenerationContext)
 end
 
 function generate(v::VarAsArgument, gc::GenerationContext)
-  variable::SymTableEntry = getvariable(gc, v.name)
-  println("this is generate VarAsPar, variable is $variable")
-  return variable.val_identifier
+  return v.val_identifier
 end
 
 function generate(s::SimpleExpression, gc::GenerationContext)
@@ -465,6 +458,7 @@ end
 function generate(v::VariableFactor, gc::GenerationContext)
   llvm_type = mptype_to_llvm_type[v.type]
   entry::SymTableEntry = v.variable_entry
+  println("this is generate VariableFactor, val_identifier is ", entry.val_identifier)
   ret_id = create_id(gc, "var_val")
   ptln(gc, "$ret_id = load $llvm_type, $llvm_type* $(entry.val_identifier)", 1)
   return ret_id
@@ -494,4 +488,9 @@ function generate(n::NotFactor, gc::GenerationContext)
   return ret_id
 end
 
+function get_subroutine_fingerprint(s::Subroutine, implicits::Vector{SymTableEntry})
+  explicits = ["$(parameter_to_llvmtype(p)) $(p.name)" for p::Parameter in s.params]
+  implicits = ["$(mptype_to_llvm_type[s.var_type]) $(s.var_name)" for s::SymTableEntry in implicits]
+  "$(s.name)/$(join(explicits, ", "))/$(join(implicits, ", "))"
+end
 

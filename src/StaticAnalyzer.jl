@@ -18,6 +18,13 @@ unary_result_types = Dict{Tuple{TokenClass,MPType},MPType}(
 )
 
 array_type_to_scalar_type = Dict{MPType,MPType}(
+  MIntArray => MInt,
+  MRealArray => MReal,
+  MBoolArray => MBool,
+  MStringArray => MString
+)
+
+ref_type_to_scalar_type = Dict{MPType,MPType}(
   MIntRef => MInt,
   MRealRef => MReal,
   MBoolRef => MBool,
@@ -97,7 +104,9 @@ AnalysisContext() = AnalysisContext(
       )
 
 function create_var_id(ac::AnalysisContext, var_type::MPType, var_name::String)
-  return "%_$(var_type)_$(var_name)_$(ac.var_id_counter)"
+  counter = ac.var_id_counter
+  ac.var_id_counter += 1
+  return "%_$(var_type)_$(var_name)_$(counter)"
 end
 
 function hasvariable(s::AnalysisContext, var_name::String, inner_scope_only::Bool=false)
@@ -107,7 +116,7 @@ function hasvariable(s::AnalysisContext, var_name::String, inner_scope_only::Boo
   end
   if isempty(s.scope_stack) return false end
   if inner_scope_only
-    scope = first(s.scope_stack).scope_level
+    scope = s.scope
     return any(entry->entry.scope_level == scope && entry.var_name == var_name, s.scope_stack)
   end
   return any(entry->entry.var_name == var_name, s.scope_stack)
@@ -121,9 +130,8 @@ function popscope!(s::AnalysisContext)
   println("This is popscope!, scope is $(s.scope)")
   isempty(s.scope_stack) && return
   s.scope -= 1
-  println("This is popscope!, new scope is $(s.scope)")
   while !isempty(s.scope_stack) && (first(s.scope_stack).scope_level > s.scope)
-    println("This is popscope!, popping $(first(s.scope_stack))")
+    # println("This is popscope!, popping $(first(s.scope_stack))")
     pop!(s.scope_stack)
   end
 end
@@ -214,6 +222,10 @@ function parameter_to_mptype(p::Parameter)
   return p.scalar_type
 end
 
+function parameter_to_llvmtype(p::Parameter)
+  mptype_to_llvm_type[parameter_to_mptype(p)]
+end
+
 function static_analysis(s::Subroutine, ac::AnalysisContext)
   static_analysis(s.body, ac)
   s.type = MPassed
@@ -232,17 +244,22 @@ function analyze_call(c::Call, ac::AnalysisContext)
   c.subroutine = subroutine_entry.node
   compare_with_signature(subroutine_entry, c.arguments, c.line)
   enterscope!(ac)
+  c.scope_level = ac.scope
   push!(ac.in_call, c)
   for (param_name, arg) in zip(subroutine_entry.param_names, c.arguments)
-    pushvar!(ac, param_name, arg.type, "")
+    pushvar!(ac, param_name, arg.type, "%$(param_name)")
   end
   fingerprint = symbol_fingerprint(ac)
   c.fingerprint = fingerprint
-  if fingerprint ∉ c.subroutine.fingerprints
+  # if fingerprint ∉ c.subroutine.fingerprints
+  if fingerprint ∉ keys(c.subroutine.fingerprint_to_implicits_and_f_id)
     println("fingerprint $fingerprint not found")
     static_analysis(subroutine_entry.node, ac)
-    push!(c.subroutine.fingerprints, fingerprint)
-    push!(c.subroutine.implicit_param_lists, c.implicit_params)
+    # push!(c.subroutine.fingerprints, fingerprint)
+    # push!(c.subroutine.implicit_param_lists, c.implicit_params)
+    llvm_function_name = get_llvm_function_name(subroutine_entry.name, c.call_id)
+    c.subroutine.fingerprint_to_implicits_and_f_id[fingerprint] = (c.implicit_params, llvm_function_name)
+    CallFactor
   end
   pop!(ac.in_call)
   popscope!(ac)
@@ -301,7 +318,6 @@ function static_analysis(p::Parameter, ac::AnalysisContext)
       "Array size must have integer value, got $(p.size.type) (line $(p.line))."
     ))
   end
-  pushvar!(ac, p.name, p.scalar_type, "")
   p.type = MPassed
 end
 
@@ -319,7 +335,11 @@ function static_analysis(d::Declaration, ac::AnalysisContext)
   DEBUG && println("This is static analysis, analysing Declaration")
   var_type = d.var_type.scalar_type
   for name in map(token->token.lexeme, d.names)
-    if hasvariable(ac, name)
+    if hasvariable(ac, name, true)
+      # debugging
+      entry = getvariable(ac, name)
+      println("This is static_analysis(::Declaration), found entry $(entry)")
+      println("This is static_analysis(::Declaration), current scope is $(ac.scope)")
       throw(StaticAnalysisException(
         "Cannot redeclare variable $(name) (line $(d.line))."
       ))
@@ -353,6 +373,9 @@ function static_analysis(a::Assignment, ac::AnalysisContext)
   value_type = typecheck(a.value, ac)
   entry::SymTableEntry = getvariable(ac, var_name)
   var_type = entry.var_type
+  if var_type ∈ keys(ref_to_scalar_type)
+    var_type = ref_to_scalar_type[var_type]
+  end
   if value_type != var_type
     throw(StaticAnalysisException(
       "Cannot assign a value of type $(value_type) to variable '$(var_name)' of type $(var_type) (line $(a.line))."
@@ -461,6 +484,7 @@ function typecheck(v::VarAsArgument, ac::AnalysisContext)
     ))
   end
   variable::SymTableEntry = getvariable(ac, v.name)
+  v.val_identifier = variable.val_identifier
   v.type = scalar_to_ref_type[variable.var_type]
 end
 
@@ -492,11 +516,19 @@ function typecheck(v::VariableFactor, ac::AnalysisContext)
     ))
   end
   var_entry::SymTableEntry = getvariable(ac, var_name)
-  if var_entry.scope_level < ac.scope && !isempty(ac.in_call)
-    push!(first(ac.in_call).implicit_params, var_entry)
-  end
   v.variable_entry = var_entry
-  v.type = var_entry.var_type
+  if !isempty(ac.in_call) && var_entry.scope_level < first(ac.in_call).scope_level
+    println("variable $(var_name) was defined in scope $(var_entry.scope_level) ")
+    push!(first(ac.in_call).implicit_params, var_entry)
+    new_entry = SymTableEntry(var_name, var_entry.var_type, "%$(var_name)", ac.scope)
+    v.variable_entry = new_entry
+    println("variable_entry was set to $(v.variable_entry)")
+  end
+  var_type = var_entry.var_type
+  if var_type ∈ keys(ref_to_scalar_type)
+    var_type = ref_to_scalar_type[var_type]
+  end
+  v.type = var_type
 end
 
 function typecheck(a::ArrayAccessFactor, ac::AnalysisContext)
@@ -571,4 +603,8 @@ function typecheck(s::SizeFactor, ac::AnalysisContext)
       "Array size is not defined for values of type $(array_type) (on line $(s.line))."))
   end
   s.type = MInt
+end
+
+function get_llvm_function_name(subroutine_name::String, call_id::Int)
+  return "@_$(subroutine_name)$(call_id)"
 end

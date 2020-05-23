@@ -146,9 +146,11 @@ Parameter(name::String,
 
 mutable struct VarAsArgument <: Value
   name::String
+  val_identifier::String
   line::Int
   type::MPType
 end
+VarAsArgument(name::String, line::Int) = VarAsArgument(name, "", line, MUndefined)
 
 # Function or procedure.
 mutable struct Subroutine <: Node
@@ -158,11 +160,12 @@ mutable struct Subroutine <: Node
   body::Block
   fingerprints::Vector{String}
   implicit_param_lists::Vector{Vector{SymTableEntry}}
+  fingerprint_to_implicits_and_f_id::Dict{String,Tuple{Vector{SymTableEntry},String}}
   line::Int
   type::MPType
   end
 Subroutine(name, params, ret_type, body, line) =
-  Subroutine(name, params, ret_type, body, Vector{String}(), Vector{Vector{SymTableEntry}}(), line, MUndefined) 
+  Subroutine(name, params, ret_type, body, Vector{String}(), Vector{Vector{SymTableEntry}}(), Dict{String,Tuple{Vector{SymTableEntry},String}}(), line, MUndefined) 
 
 mutable struct Definitions <: Node
   defs::Vector{Subroutine}
@@ -179,13 +182,6 @@ mutable struct Program <: Node
   end
 Program(definitions, main, line) = Program(definitions, main, line, MUndefined)
 
-# mutable struct Arguments <: Node
-#   arguments::Vector{Value}
-#   line::Int
-#   type::MPType
-#   Arguments(arguments, line) = new(arguments, line, MUndefined)
-# end
-
 mutable struct CallStatement <: Statement
   identifier::String
   arguments::Vector{Value}
@@ -193,11 +189,12 @@ mutable struct CallStatement <: Statement
   subroutine::Union{Subroutine,Nothing}
   call_id::Int
   fingerprint::String
+  scope_level::Int
   line::Int
   type::MPType
 end
 CallStatement(identifier, arguments, call_id, line) =
-  CallStatement(identifier, arguments, Vector{SymTableEntry}(), nothing, call_id, "", line, MUndefined)
+  CallStatement(identifier, arguments, Vector{SymTableEntry}(), nothing, call_id, "", 0, line, MUndefined)
 
 mutable struct Declaration <: Statement
   var_type::TypeOfVarOrValue
@@ -355,11 +352,12 @@ mutable struct CallFactor <: Factor
   subroutine::Union{Subroutine,Nothing}
   call_id::Int
   fingerprint::String
+  scope_level::Int
   line::Int
   type::MPType
 end
 CallFactor(identifier, arguments, call_id, line) =
-  CallFactor(identifier, arguments, Vector{String}(), nothing, call_id, "", line, MUndefined)
+  CallFactor(identifier, arguments, Vector{String}(), nothing, call_id, "", 0, line, MUndefined)
 
 Call = Union{CallFactor,CallStatement}
 
@@ -547,9 +545,9 @@ function parameter(pc::ParsingContext)
   if nextclass(pc) == kw_array
     is_array = true
   end
-  v_type = var_type(pc)
+  v_type::TypeOfVarOrValue = var_type(pc)
   println("this is parameter, v_type is $v_type")
-  return Parameter(name.lexeme, v_type.var_type, is_var_par, is_array, v_type.size, line)
+  return Parameter(name.lexeme, v_type.scalar_type, is_var_par, is_array, v_type.size, line)
 end
 
 function definitions(pc::ParsingContext)
