@@ -30,6 +30,20 @@ const ref_types = Vector{MPType}([
   MStringRef
 ])
 
+const array_types = Vector{MPType}([
+  MIntArray,
+  MRealArray,
+  MBoolArray,
+  MStringArray
+])
+
+const scalar_types = Vector{MPType}([
+  MInt,
+  MReal,
+  MBool,
+  MString
+])
+
 token_class_to_scalar_type = Dict{TokenClass,MPType}(
   kw_int => MInt,
   kw_real => MReal,
@@ -52,7 +66,11 @@ scalar_to_ref_type = Dict{MPType,MPType}(
   MIntRef => MIntRef,
   MRealRef => MRealRef,
   MBoolRef => MBoolRef,
-  MStringRef => MStringRef
+  MStringRef => MStringRef,
+  MIntArray => MIntArray,
+  MRealArray => MRealArray,
+  MBoolArray => MBoolArray,
+  MStringArray => MStringArray
 )
 
 scalar_to_array_type = Dict{MPType,MPType}(
@@ -307,30 +325,6 @@ mutable struct Return <: Statement
   type::MPType
 end
 Return(value, line) = Return(value, line, MUndefined)
-
-# mutable struct Term <: Value
-#   factors::Array{Tuple{Factor,Token},1}
-#   line::Int
-#   type::MPType
-# end
-# Term(factors, line) = Term(factors, line, MUndefined)
-
-# mutable struct SimpleExpression <: Value
-#   terms::Array{Tuple{Term,Token},1}
-#   line::Int
-#   type::MPType
-# end
-# SimpleExpression(terms, line) = SimpleExpression(terms, line, MUndefined)
-
-# mutable struct RelationalExpression <: Value
-#   left::SimpleExpression
-#   right::SimpleExpression
-#   operation::Token
-#   line::Int
-#   type::MPType
-# end
-# RelationalExpression(left, right, operation, line) =
-#   RelationalExpression(left, right, operation, line, MUndefined)
 
 mutable struct SizeFactor <: Factor
   array::Factor
@@ -963,8 +957,9 @@ function var_type(pc::ParsingContext)
     match_term(close_sqr_bracket, pc, current_unit)
     match_term(kw_of, pc, current_unit)
     s_type = next_token(pc)
-    match_term(identifier, pc, current_unit)
-    return TypeOfVarOrValue(token_class_to_scalar_type[s_type.class], scalar_to_array_type[s_type.class], len, line)
+    match_term(s_type.class, pc, current_unit)
+    scalar_type = token_class_to_scalar_type[s_type.class]
+    return TypeOfVarOrValue(scalar_type, scalar_to_array_type[scalar_type], len, line)
   end
   match_term(class, pc, current_unit)
   return TypeOfVarOrValue(token_class_to_scalar_type[class], token_class_to_scalar_type[class], ImmediateInt(0), line)

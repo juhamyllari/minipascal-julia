@@ -50,6 +50,10 @@ mptype_to_llvm_type = Dict{MPType,String}(
   MStringRef => STRING_TYPE_ID * "**",
   MBoolRef => "i1*",
   MNothing => "void",
+  MIntArray => INT_ARRAY_TYPE_ID,
+  MRealArray => REAL_ARRAY_TYPE_ID,
+  MBoolArray => BOOL_ARRAY_TYPE_ID,
+  MStringArray => STRING_ARRAY_TYPE_ID,
 )
 
 op_and_type_to_cond = Dict{Tuple{TokenClass,MPType},String}(
@@ -185,6 +189,10 @@ end
 function generate_types(gc)
   ptln(gc, "$STRING_TYPE_ID = type { i8*, i32 }")
   ptln(gc, "$ARRAY_TYPE_ID = type { i8*, i32 }")
+  ptln(gc, "$INT_ARRAY_TYPE_ID = type { i32*, i32 }")
+  ptln(gc, "$REAL_ARRAY_TYPE_ID = type { double*, i32 }")
+  ptln(gc, "$BOOL_ARRAY_TYPE_ID = type { i1*, i32 }")
+  ptln(gc, "$STRING_ARRAY_TYPE_ID = type { i8*, i32 }")
   ptln(gc, "")
 end
 
@@ -229,8 +237,8 @@ end
 
 function generate_default_values(gc::GenerationContext)
   all_types = Vector{MPType}(unique(type for (name, type) in gc.all_var_names_and_types))
-  # TODO: exclude arrays etc. if necessary
-  for type in setdiff(all_types, [MString])
+  # TODO: exclude other types if necessary
+  for type in setdiff(all_types, [MString], array_types)
     ptln(gc, "@default_$(type) = global $(mptype_to_llvm_type[type]) $(default_value_strings[type])")
   end
 end
@@ -248,8 +256,25 @@ end
 function generate(d::Declaration, gc)
   mptype = d.var_type.true_type
   llvm_type = mptype_to_llvm_type[mptype]
-  for id in d.unique_ids
-    ptln(gc, "$id = alloca $(llvm_type)", 1)
+  if mptype in array_types
+    scalar_llvm_type = mptype_to_llvm_type[d.var_type.scalar_type]
+    for id in d.unique_ids
+      ptln(gc, "$id = alloca $(llvm_type)", 1)
+      arr_id = create_id(gc, "arr_content")
+      println("This is generate declaration, creating array. The size node is $(d.var_type.size)")
+      size_id = generate(d.var_type.size, gc)
+      ptln(gc, "$arr_id = alloca $(scalar_llvm_type), i32 $size_id", 1)
+      arr_ptr_id = create_id(gc, "arr_ptr")
+      ptln(gc, "$arr_ptr_id = getelementptr $(llvm_type), $(llvm_type)* $id, i32 0, i32 0", 1)
+      ptln(gc, "store $(scalar_llvm_type)* $arr_id, $(scalar_llvm_type)** $arr_ptr_id", 1)
+      size_ptr_id = create_id(gc, "size_ptr")
+      ptln(gc, "$size_ptr_id = getelementptr $(llvm_type), $(llvm_type)* $id, i32 0, i32 1", 1)
+      ptln(gc, "store i32 $size_id, i32* $size_ptr_id", 1)
+    end
+  else
+    for id in d.unique_ids
+      ptln(gc, "$id = alloca $(llvm_type)", 1)
+    end
   end
 end
 
@@ -481,9 +506,8 @@ function generate(l::LiteralFactor, gc::GenerationContext)
     str_len_ptr_id = create_id(gc, "str_len")
     ptln(gc, "$str_len_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $ret_id, i32 0, i32 1", 1)
     ptln(gc, "store i32 $(str_len), i32* $str_len_ptr_id", 1)
-  else
-    println("codegen for arrays not implemented")
   end
+  println("This is generate literal, about to return $(ret_id)")
   return ret_id
 end
 
@@ -507,6 +531,17 @@ function generate(v::VariableFactor, gc::GenerationContext)
   return ret_id
 end
 
+function generate(s::SizeFactor, gc::GenerationContext)
+  println("this is generate(s::SizeFactor), array has type $(s.array.type)")
+  ret_id = create_id(gc, "array_size")
+  bitcast_id = create_id(gc, "cast_to_array")
+  llvm_type = mptype_to_llvm_type[s.array.type]
+  array_id = generate(s.array, gc)
+  ptln(gc, "$bitcast_id = bitcast $(llvm_type)* $array_id to $ARRAY_TYPE_ID*" , 1)
+  ptln(gc, "$ret_id = call i32 $GET_ARRAY_SIZE_ID($ARRAY_TYPE_ID* $bitcast_id)", 1)
+  return ret_id
+end
+
 function generate(a::ArrayAccessFactor, gc::GenerationContext)
   variable_entry::SymTableEntry = getvariable(gc, a.identifier.lexeme)
   val_id = variable_entry.val_identifier
@@ -517,7 +552,7 @@ function generate(a::ArrayAccessFactor, gc::GenerationContext)
   val_ptr_id = create_id(gc, "val_ptr")
   ret_id = create_id(gc, "array_el")
   len_id = create_id(gc, "array_len_ptr")
-  ptln(gc, "$len_id = call i32 $GET_LENGTH_ID($ARRAY_TYPE_ID* $val_id)", 1)
+  ptln(gc, "$len_id = call i32 $GET_ARRAY_SIZE_ID($ARRAY_TYPE_ID* $val_id)", 1)
   # TODO: runtime array bounds checking
   ptln(gc, "$arr_ptr_id = call i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* $val_id)", 1)
   ptln(gc, "$val_ptr_id = getelementptr $llvm_type, $llvm_type* bitcast (i8* $arr_ptr_id to $llvm_type), i32 0, i32 $index_id", 1)

@@ -195,8 +195,10 @@ end
 
 function push_defaults!(ac::AnalysisContext)
   for (name, mptype) in ac.all_var_names_and_types
-    ref_type = scalar_to_ref_type[mptype]
-    pushvar!(ac, name, ref_type, "@default_$(mptype)")
+    if mptype ∈ scalar_types
+      ref_type = scalar_to_ref_type[mptype]
+      pushvar!(ac, name, ref_type, "@default_$(mptype)")
+    end
   end
   enterscope!(ac)
 end
@@ -404,6 +406,7 @@ end
 
 function static_analysis(d::Declaration, ac::AnalysisContext)
   DEBUG && println("This is static analysis, analysing Declaration")
+  static_analysis(d.var_type, ac)
   var_type = d.var_type.true_type
   for name in map(token->token.lexeme, d.names)
     if hasvariable(ac, name, true)
@@ -426,6 +429,11 @@ end
 
 function static_analysis(c::TypeOfVarOrValue, ac::AnalysisContext)
   typecheck(c.size, ac)
+  if c.size.type != MInt
+    throw(StaticAnalysisException(
+      "Array size must have integer type (line $(c.line))."
+    ))
+  end
   c.type = MPassed
 end
 
@@ -638,10 +646,10 @@ end
 # end
 
 function typecheck(s::SizeFactor, ac::AnalysisContext)
-  array_type = typecheck(s.array, ac)
-  if array_type ∉ [MIntRef, MRealRef, MBoolRef, MStringRef]
+  type = typecheck(s.array, ac)
+  if type ∉ [MIntArray, MRealArray, MBoolArray, MStringArray]
     throw(StaticAnalysisException(
-      "Array size is not defined for values of type $(array_type) (on line $(s.line))."))
+      "Array size is not defined for values of type $(type) (on line $(s.line))."))
   end
   s.type = MInt
 end

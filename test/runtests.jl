@@ -241,10 +241,10 @@ function myadddoubleds(x:int, y:int):int;
     return mydouble(x)+mydouble(y);
   end;
 
-function mydouble(a:real):real;
+{*function mydouble(a:real):real;
   begin
     return 42.0 {* My favourite double *};
-  end;
+  end;*}
 
 function mydouble(a:int):int;
   begin
@@ -257,6 +257,16 @@ begin
   writeln(myadddoubleds(22,20));
 end.
 """,
+
+"""
+program prog19;
+
+begin
+  var a: array[38+4] of int;
+  writeln(a.size);
+end.
+""",
+
 ]
 
 # Write your own tests here.
