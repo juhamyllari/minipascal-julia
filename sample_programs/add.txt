@@ -1,5 +1,0 @@
-program foo;
-
-begin
-  writeln 5 + 2;
-end.

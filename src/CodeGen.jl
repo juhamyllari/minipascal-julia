@@ -154,8 +154,6 @@ function generate(s::Subroutine, gc::GenerationContext)
 end
 
 function generate_subroutine(s::Subroutine, llvm_function_name::String, gc::GenerationContext)
-  println("This is generate_subroutine, subr name is $(s.name)")
-  println("llvm function name is $(llvm_function_name)")
   llvm_ret_type = mptype_to_llvm_type[s.ret_type.scalar_type]
   args = ["$(mptype_to_llvm_type[parameter_to_mptype(param)]) %$(param.name)" for param in s.params]
   for (name, mptype) in gc.all_var_names_and_types
@@ -261,7 +259,6 @@ function generate(d::Declaration, gc)
     for id in d.unique_ids
       ptln(gc, "$id = alloca $(llvm_type)", 1)
       arr_id = create_id(gc, "arr_content")
-      println("This is generate declaration, creating array. The size node is $(d.var_type.size)")
       size_id = generate(d.var_type.size, gc)
       ptln(gc, "$arr_id = alloca $(scalar_llvm_type), i32 $size_id", 1)
       arr_ptr_id = create_id(gc, "arr_ptr")
@@ -328,8 +325,6 @@ function generate(c::CallFactor, gc::GenerationContext)
 end
 
 function generate_call(c::Call, gc::GenerationContext)
-  println("This is generate_call. Call is to $(c.identifier)")
-  println("This is generate_call. Args are $(c.arguments)")
   subroutine::Subroutine = c.subroutine
   ret_type = subroutine.ret_type.true_type
   
@@ -337,10 +332,6 @@ function generate_call(c::Call, gc::GenerationContext)
   explicit_arg_types = [mptype_to_llvm_type[arg.type] for arg in c.arguments ]
 
   llvm_function_name = subroutine.llvm_function_name
-  println("This is generate_call. Implicit params are $(c.implicit_params)")
-
-  # implicit_arg_ids = [param.val_identifier for param in c.implicit_params]
-  # implicit_arg_types = [mptype_to_llvm_type[scalar_to_ref_type[param.var_type]] for param in c.implicit_params]
 
   implicit_arg_ids, implicit_arg_types = get_implicit_ids_and_llvm_types(c.implicit_params, gc)
 
@@ -427,6 +418,14 @@ function get_identity(type::MPType)
     return
   end
   println("identity function for $(type) not implemented yet")
+end
+
+function generate(r::Read, gc::GenerationContext)
+  for (var::Variable, type::MPType) in zip(r.variables, r.var_types)
+    throw(StaticAnalysisException(
+      "Code generation for Read statement not implemented."
+    ))
+  end
 end
 
 function generate(p::Write, gc::GenerationContext)
@@ -521,7 +520,6 @@ function generate(l::LiteralFactor, gc::GenerationContext)
     ptln(gc, "$str_len_ptr_id = getelementptr $STRING_TYPE_ID, $STRING_TYPE_ID* $ret_id, i32 0, i32 1", 1)
     ptln(gc, "store i32 $(str_len), i32* $str_len_ptr_id", 1)
   end
-  println("This is generate literal, about to return $(ret_id)")
   return ret_id
 end
 
@@ -532,10 +530,6 @@ end
 function generate(v::VariableFactor, gc::GenerationContext)
   llvm_type = mptype_to_llvm_type[v.type]
   entry::SymTableEntry = v.variable_entry
-  println("this is generate VariableFactor, val_identifier is ", entry.val_identifier)
-  println("variable type is $(v.type)")
-  println("entry type is $(v.variable_entry.var_type)")
-  println("val_identifier is $(entry.val_identifier)")
   ret_id = create_id(gc, "var_val")
   if v.variable_entry.var_type ∉ ref_types
     return entry.val_identifier
@@ -546,7 +540,6 @@ function generate(v::VariableFactor, gc::GenerationContext)
 end
 
 function generate(s::SizeFactor, gc::GenerationContext)
-  println("this is generate(s::SizeFactor), array has type $(s.array.type)")
   ret_id = create_id(gc, "array_size")
   bitcast_id = create_id(gc, "cast_to_array")
   llvm_type = mptype_to_llvm_type[s.array.type]

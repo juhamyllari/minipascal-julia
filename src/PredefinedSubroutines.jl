@@ -87,7 +87,7 @@ define i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* %arr) {
 }
 """
 
-const HELPER_FUNCTIONS = [
+HELPER_FUNCTIONS = [
   write_bool,
   combined_length,
   concat,

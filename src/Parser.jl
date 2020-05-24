@@ -23,21 +23,21 @@ end
   MUndefined
 end
 
-const ref_types = Vector{MPType}([
+ref_types = Vector{MPType}([
   MIntRef,
   MRealRef,
   MBoolRef,
   MStringRef
 ])
 
-const array_types = Vector{MPType}([
+array_types = Vector{MPType}([
   MIntArray,
   MRealArray,
   MBoolArray,
   MStringArray
 ])
 
-const scalar_types = Vector{MPType}([
+scalar_types = Vector{MPType}([
   MInt,
   MReal,
   MBool,
@@ -254,7 +254,7 @@ mutable struct Declaration <: Statement
 end
 Declaration(var_type, names, line) = Declaration(var_type, names, Vector{String}(), line, MUndefined)
 
-mutable struct Variable <: Pseudonode
+mutable struct Variable <: Node
   identifier::String
   is_array_access::Bool
   array_index::Value
@@ -299,7 +299,8 @@ end
 While(condition, do_stmt, line) = While(condition, do_stmt, line, MUndefined)
 
 mutable struct Read <: Statement
-  variable::Token
+  variables::Vector{Variable}
+  var_types::Vector{MPType}
   line::Int
   type::MPType
 end
@@ -580,7 +581,6 @@ function parameter(pc::ParsingContext)
     is_array = true
   end
   v_type::TypeOfVarOrValue = var_type(pc)
-  println("this is parameter, v_type is $v_type")
   return Parameter(name.lexeme, v_type.scalar_type, is_var_par, is_array, v_type.size, line)
 end
 
@@ -691,6 +691,19 @@ function simple_statement(pc::ParsingContext)
   throw(SyntaxException(
     "Failed to parse statement on line $(line).")
   )
+end
+
+function read_statement(pc::ParsingContext)
+  current_unit = "read statement"
+  token, class, line = token_class_line(pc)
+  match_term(kw_read, pc, current_unit)
+  match_term(open_paren, pc, current_unit)
+  vars = Vector{Value}()
+  while nextclass(pc) != close_paren
+    push!(vars, variable(pc))
+  end
+  match_term(close_paren, pc, current_unit)
+  return Read(vars, line)
 end
 
 function return_statement(pc::ParsingContext)

@@ -1,11 +1,8 @@
 module MiniPascal
+include("CodeGen.jl")
 
 import Base: *,+,-,÷,<,!,&,==,showerror
 
-DEBUG = true
-
-include("CodeGen.jl")
-
-greet() = println("Hello World!")
+DEBUG = false
 
 end # module

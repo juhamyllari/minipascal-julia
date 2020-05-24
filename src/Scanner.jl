@@ -243,11 +243,9 @@ end
 function getNumber(input, next, lineNumber)
   initial = next
   integer_block, next = get_number_block(input, next)
-  println("int block is $(integer_block), next points to $(input[next])")
   if input[next] == '.'
     next += 1
     decimal_block, next = get_number_block(input, next)
-    println("dec block is $(decimal_block), next points to $(input[next])")
     if input[next] ∈ ['e','E']
       next += 1
       sign = '+'

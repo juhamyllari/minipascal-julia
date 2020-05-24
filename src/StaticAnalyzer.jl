@@ -6,7 +6,7 @@ struct StaticAnalysisException <: Exception
   msg::String
 end
 
-const default_value_strings = Dict{MPType,String}(
+default_value_strings = Dict{MPType,String}(
   MInt => "-1",
   MReal => "-1.0",
   MBool => "false",
@@ -121,7 +121,6 @@ end
 
 function hasvariable(s::AnalysisContext, var_name::String, inner_scope_only::Bool=false)
   if DEBUG
-    println("This is hasentry, looking for variable $(var_name). The following names are known:")
     foreach(println, s.scope_stack)
   end
   if isempty(s.scope_stack) return false end
@@ -133,17 +132,13 @@ function hasvariable(s::AnalysisContext, var_name::String, inner_scope_only::Boo
 end
 
 function getvariable(s::AnalysisContext, var_name)
-  println("This is getvariable getting $(var_name).")
-  println("Known names are $(s.scope_stack).")
   return getfirst(entry -> entry.var_name == var_name, s.scope_stack)
 end
 
 function popscope!(s::AnalysisContext)
-  println("This is popscope!, scope is $(s.scope)")
   isempty(s.scope_stack) && return
   s.scope -= 1
   while !isempty(s.scope_stack) && (first(s.scope_stack).scope_level > s.scope)
-    # println("This is popscope!, popping $(first(s.scope_stack))")
     pop!(s.scope_stack)
   end
 end
@@ -312,7 +307,6 @@ function analyze_call(c::Call, ac::AnalysisContext)
   all_var_names = Vector{String}(unique([name for (name, type) in ac.all_var_names_and_types]))
 
   c.implicit_params = [getvariable(ac, p) for p in all_var_names]
-  println("Implicit params are $(c.implicit_params)")
 
   subroutines_in_call = [call.identifier for call in ac.in_call]
   if subroutine_entry.name ∈ subroutines_in_call
@@ -345,10 +339,6 @@ function get_implicit_param_id(name::String, mptype::MPType)
 end
 
 function compare_with_signature(sr::SubroutineEntry, args::Vector{Value}, line::Int)
-  println("This is compare_with_signature, subr name is $(sr.name)")
-  println("Params are $(sr.param_names)")
-  println("Their types are $(sr.param_types)")
-  println("Args are $(args)")
   if length(sr.param_types) != length(args)
     throw(StaticAnalysisException(
       "Subroutine call has $(length(args)) arguments, expected $(length(sr.param_types)) (line $line)."
@@ -385,14 +375,11 @@ function static_analysis(p::Parameter, ac::AnalysisContext)
 end
 
 function static_analysis(b::Block, ac::AnalysisContext, only_collect=false)
-  DEBUG && println("This is static analysis, analysing Block")
-  DEBUG && println("Only collect? $(only_collect)")
   if !b.is_subroutine_block enterscope!(ac) end
   for stmt in b.statements
     if !only_collect
       static_analysis(stmt, ac)
     elseif stmt isa VariableFactor
-      println("found VariableFactor $(stmt.identifier) in a subroutine body")
       if !hasvariable(ac, stmt.identifier, true)
         push!(b.subroutine.implicit_params, stmt.identifier)
       end
@@ -410,10 +397,7 @@ function static_analysis(d::Declaration, ac::AnalysisContext)
   var_type = d.var_type.true_type
   for name in map(token->token.lexeme, d.names)
     if hasvariable(ac, name, true)
-      # debugging
       entry = getvariable(ac, name)
-      println("This is static_analysis(::Declaration), found entry $(entry)")
-      println("This is static_analysis(::Declaration), current scope is $(ac.scope)")
       if !entry.is_implicit
         throw(StaticAnalysisException(
           "Cannot redeclare variable $(name) (line $(d.line))."
@@ -462,8 +446,6 @@ function static_analysis(a::Assignment, ac::AnalysisContext)
   end
   if value_type != var_type
     if !(a.is_array_access && scalar_to_array_type[value_type] == var_type)
-      println("This is static analysis of Assignment. Is array access? $(a.is_array_access)")
-      println("This is static analysis of Assignment. Is array access? $(a.is_array_access)")
       throw(StaticAnalysisException(
         "Cannot assign a value of type $(value_type) to variable '$(var_name)' of type $(var_type) (line $(a.line))."
       ))
@@ -502,6 +484,25 @@ function static_analysis(w::While, ac::AnalysisContext)
   end
   static_analysis(w.do_stmt, ac)
   w.type = MPassed
+end
+
+function static_analysis(r::Read, ac::AnalysisContext)
+  for var::Variable in r.variables
+    static_analysis(var, ac)
+    if !hasvariable(ac, var.identifier)
+      throw(StaticAnalysisException(
+        "Trying to read to undeclared variable $(var.identifier) (line $(r.line))."
+      ))
+    end
+    entry::SymTableEntry = getvariable(ac, var.identifier)
+    push!(r.var_types, entry.var_type)
+    if entry.var_type ∉ scalar_types
+      throw(StaticAnalysisException(
+        "Only scalar variable types can be read (line $(r.line))."
+      ))
+    end
+  end
+  r.type = MPassed
 end
 
 function static_analysis(p::Write, ac::AnalysisContext)
