@@ -23,17 +23,24 @@ end
   MUndefined
 end
 
+const ref_types = Vector{MPType}([
+  MIntRef,
+  MRealRef,
+  MBoolRef,
+  MStringRef
+])
+
 token_class_to_scalar_type = Dict{TokenClass,MPType}(
   kw_int => MInt,
   kw_real => MReal,
-  kw_bool => MBool,
+  kw_boolean => MBool,
   kw_string => MString
 )
 
 token_class_to_ref_type = Dict{TokenClass,MPType}(
   kw_int => MIntRef,
   kw_real => MRealRef,
-  kw_bool => MBoolRef,
+  kw_boolean => MBoolRef,
   kw_string => MStringRef
 )
 
@@ -41,7 +48,11 @@ scalar_to_ref_type = Dict{MPType,MPType}(
   MInt => MIntRef,
   MReal => MRealRef,
   MBool => MBoolRef,
-  MString => MStringRef
+  MString => MStringRef,
+  MIntRef => MIntRef,
+  MRealRef => MRealRef,
+  MBoolRef => MBoolRef,
+  MStringRef => MStringRef
 )
 
 scalar_to_array_type = Dict{MPType,MPType}(
@@ -50,8 +61,6 @@ scalar_to_array_type = Dict{MPType,MPType}(
   MBool => MBoolArray,
   MString => MStringArray
 )
-
-ref_to_scalar_type = Dict(val => key for (key, val) in scalar_to_ref_type)
 
 mutable struct ImplicitParameter
   name::String
@@ -64,7 +73,10 @@ mutable struct SymTableEntry
   var_type::MPType
   val_identifier::String
   scope_level::Int
+  is_implicit::Bool
 end
+SymTableEntry(var_name::String, var_type::MPType, val_identifier::String, scope_level::Int) =
+  SymTableEntry(var_name::String, var_type::MPType, val_identifier::String, scope_level::Int, false)
 
 abstract type Node end
 # Pseudonodes are nodelike structs that assist in parsing
@@ -74,6 +86,23 @@ abstract type Statement <: Node end
 abstract type Value <: Node end
 abstract type Factor <: Value end
 abstract type If <: Statement end
+
+mutable struct BinaryOperation <: Value
+  op::TokenClass
+  left::Value
+  right::Value
+  line::Int
+  type::MPType
+end
+BinaryOperation(op, left, right, line) = BinaryOperation(op, left, right, line, MUndefined)
+
+mutable struct UnaryOperation <: Value
+  op::TokenClass
+  operand::Value
+  line::Int
+  type::MPType
+end
+UnaryOperation(op, operand, line) = UnaryOperation(op, operand, line, MUndefined)
 
 mutable struct ImmediateInt <: Value
   value::Int
@@ -102,10 +131,11 @@ ImmediateBool(value::Bool) = ImmediateBool(value, MUndefined)
 mutable struct Block <: Statement
   statements::Vector{Statement}
   is_subroutine_block::Bool
+  subroutine::Union{Node,Nothing}
   line::Int
   type::MPType
 end
-Block(statements::Vector{Statement}, line::Int) = Block(statements, false, line, MUndefined)
+Block(statements::Vector{Statement}, line::Int) = Block(statements, false, nothing, line, MUndefined)
 
 mutable struct TypeOfVarOrValue <: Node
   scalar_type::MPType
@@ -144,28 +174,29 @@ Parameter(name::String,
     line,
     MUndefined)
 
-mutable struct VarAsArgument <: Value
-  name::String
-  val_identifier::String
-  line::Int
-  type::MPType
-end
-VarAsArgument(name::String, line::Int) = VarAsArgument(name, "", line, MUndefined)
-
 # Function or procedure.
 mutable struct Subroutine <: Node
   name::String
   params::Vector{Parameter}
   ret_type::TypeOfVarOrValue
   body::Block
-  fingerprints::Vector{String}
-  implicit_param_lists::Vector{Vector{SymTableEntry}}
-  fingerprint_to_implicits_and_f_id::Dict{String,Tuple{Vector{SymTableEntry},String}}
+  calls_subroutines::Vector{String}
+  llvm_function_name::String
+  is_called::Bool   # No codegen for subroutines that are never called
   line::Int
   type::MPType
-  end
+end
 Subroutine(name, params, ret_type, body, line) =
-  Subroutine(name, params, ret_type, body, Vector{String}(), Vector{Vector{SymTableEntry}}(), Dict{String,Tuple{Vector{SymTableEntry},String}}(), line, MUndefined) 
+  Subroutine(
+    name,
+    params,
+    ret_type,
+    body,
+    Vector{String}(),
+    "",
+    false,
+    line,
+    MUndefined) 
 
 mutable struct Definitions <: Node
   defs::Vector{Subroutine}
@@ -214,6 +245,7 @@ end
 mutable struct Assignment <: Statement
   variable_name::String
   var_unique_id::String
+  var_type::MPType
   is_array_access::Bool
   array_index::Value  # Array index. Can use ImmediateInt(-1) for non-array access assignments.
   value::Value
@@ -221,7 +253,7 @@ mutable struct Assignment <: Statement
   type::MPType
 end
 Assignment(variable_name::String, is_array_access::Bool, index::Value, value::Value, line::Int) =
-  Assignment(variable_name, "", is_array_access, index, value, line, MUndefined)
+  Assignment(variable_name, "", MUndefined, is_array_access, index, value, line, MUndefined)
 
 mutable struct IfThen <: If
   condition::Value
@@ -276,29 +308,29 @@ mutable struct Return <: Statement
 end
 Return(value, line) = Return(value, line, MUndefined)
 
-mutable struct Term <: Value
-  factors::Array{Tuple{Factor,Token},1}
-  line::Int
-  type::MPType
-end
-Term(factors, line) = Term(factors, line, MUndefined)
+# mutable struct Term <: Value
+#   factors::Array{Tuple{Factor,Token},1}
+#   line::Int
+#   type::MPType
+# end
+# Term(factors, line) = Term(factors, line, MUndefined)
 
-mutable struct SimpleExpression <: Value
-  terms::Array{Tuple{Term,Token},1}
-  line::Int
-  type::MPType
-end
-SimpleExpression(terms, line) = SimpleExpression(terms, line, MUndefined)
+# mutable struct SimpleExpression <: Value
+#   terms::Array{Tuple{Term,Token},1}
+#   line::Int
+#   type::MPType
+# end
+# SimpleExpression(terms, line) = SimpleExpression(terms, line, MUndefined)
 
-mutable struct RelationalExpression <: Value
-  left::SimpleExpression
-  right::SimpleExpression
-  operation::Token
-  line::Int
-  type::MPType
-end
-RelationalExpression(left, right, operation, line) =
-  RelationalExpression(left, right, operation, line, MUndefined)
+# mutable struct RelationalExpression <: Value
+#   left::SimpleExpression
+#   right::SimpleExpression
+#   operation::Token
+#   line::Int
+#   type::MPType
+# end
+# RelationalExpression(left, right, operation, line) =
+#   RelationalExpression(left, right, operation, line, MUndefined)
 
 mutable struct SizeFactor <: Factor
   array::Factor
@@ -336,6 +368,13 @@ mutable struct VariableFactor <: Factor
   type::MPType
 end
 VariableFactor(identifier::String, line::Int) = VariableFactor(identifier, nothing, line, MUndefined)
+
+mutable struct GetRef <: Value
+  operand::VariableFactor
+  line::Int
+  type::MPType
+end
+GetRef(operand::VariableFactor, line::Int) = GetRef(operand, line, MUndefined)
 
 mutable struct ArrayAccessFactor <: Factor
   identifier::String
@@ -396,10 +435,11 @@ mutable struct ParsingContext
   index::Int
   signatures::Vector{Subroutine}
   string_literals::Vector{LiteralFactor}
+  all_var_names_and_types::Vector{Tuple{String,MPType}}
   id_counter::Int
 end
 ParsingContext(tokens::Vector{Token}) =
-  ParsingContext(tokens, 1, Vector{Subroutine}(), Vector{LiteralFactor}(), 0)
+  ParsingContext(tokens, 1, Vector{Subroutine}(), Vector{LiteralFactor}(), Vector{Tuple{String,MPType}}(), 0)
 
 function create_node_id(pc::ParsingContext)
   id = pc.id_counter
@@ -473,7 +513,6 @@ function program(pc::ParsingContext)
   if class ∈ [kw_function, kw_procedure]
     defs::Definitions = definitions(pc)
     push!(pc.signatures, defs.defs...)
-
   end
   main = block(pc)
   match_term(dot, pc, current_unit)
@@ -615,6 +654,16 @@ function var_declaration(pc::ParsingContext)
   end
   match_term(colon, pc, current_unit)
   v_type = var_type(pc)
+
+  # Collect name-type pairs into parsing context
+  true_type = v_type.true_type
+  for name in names
+    entry = (name.lexeme, true_type)
+    if entry ∉ pc.all_var_names_and_types
+      push!(pc.all_var_names_and_types, entry)
+    end
+  end
+
   return Declaration(v_type, names, line)
 end
 
@@ -726,24 +775,11 @@ function arguments(pc::ParsingContext, subroutine_name::String)
     if subroutine_name ∈ ["read", "writeln"]
       return read_writeln_args(pc, subroutine_name)
     end
-    throw(SyntaxException(
-      "Cannot call undefined subroutine $subroutine_name (line $line)."
-    ))
   end
-  parameters = (subroutine::Subroutine).params
   args = Vector{Value}()
-  for parameter::Parameter in parameters
-    if parameter.is_var_par
-      push!(args, var_as_arg(pc))
-    else
-      push!(args, expr(pc))
-    end
-    nextclass(pc) == comma && match_term(comma, pc, current_unit)
-  end
-  if nextclass(pc) != close_paren
-    throw(SyntaxException(
-    "Expected end of arguments, got '$(next_token(pc).lexeme)' (line $line)."
-    ))
+  while nextclass(pc) != close_paren
+    push!(args, expr(pc))
+    if nextclass(pc) == comma match_term(comma, pc, current_unit) end
   end
   return args
 end
@@ -769,7 +805,8 @@ function expr(pc::ParsingContext)
   if class ∈ relational_operators
     match_term(class, pc, current_unit)
     right_simple = simple_expr(pc)
-    return RelationalExpression(left_simple, right_simple, token, line)
+    # return RelationalExpression(left_simple, right_simple, token, line)
+    return BinaryOperation(class, left_simple, right_simple, line)
   end
   return left_simple
 end
@@ -778,21 +815,23 @@ function simple_expr(pc::ParsingContext)
   current_unit = "simple expression"
   token, class, line = token_class_line(pc)
   DEBUG && println("this is $(current_unit), next is ", token)
-  sign = Token(plus, "+", line)
+  first_term_sign = Token(plus, "+", line)
   if class ∈ [plus, minus]
-    sign = token
+    first_term_sign = token
     match_term(class, pc, current_unit)
   end
-  terms = Array{Tuple{Term,Token},1}()
   first_term = term(pc)
-  push!(terms, (first_term, sign))
+  if first_term_sign.class == minus
+    first_term = UnaryOperation(minus, first_term, first_term_sign.line)
+  end
+  ret_expr = first_term
   while nextclass(pc) ∈ adding_operators
     operation = next_token(pc)
     match_term(operation.class, pc, current_unit)
     new_term = term(pc)
-    push!(terms, (new_term, operation))
+    ret_expr = BinaryOperation(operation.class, ret_expr, new_term, operation.line)
   end
-  return SimpleExpression(terms, line)
+  return ret_expr
 end
 
 function term(pc::ParsingContext)
@@ -801,13 +840,16 @@ function term(pc::ParsingContext)
   DEBUG && println("this is $(current_unit), next is ", token)
   factors = Array{Tuple{Factor,Token},1}()
   first_factor = factor(pc)
-  push!(factors, (first_factor, Token(identity_op, "identity", line)))
+  ret_term = first_factor
+  # push!(factors, (first_factor, Token(identity_op, "identity", line)))
   while nextclass(pc) ∈ mult_operators
     operator = next_token(pc)
     match_term(operator.class, pc, current_unit)
-    push!(factors, (factor(pc), operator))
+    ret_term = BinaryOperation(operator.class, ret_term, factor(pc), operator.line)
+    # push!(factors, (factor(pc), operator))
   end
-  return Term(factors, line)
+  # return Term(factors, line)
+  return ret_term
 end
 
 function factor(pc::ParsingContext)
@@ -928,12 +970,12 @@ function var_type(pc::ParsingContext)
   return TypeOfVarOrValue(token_class_to_scalar_type[class], token_class_to_scalar_type[class], ImmediateInt(0), line)
 end
 
-function var_as_arg(pc::ParsingContext)
-  current_unit = "var_as_par"
-  token, class, line = token_class_line(pc)
-  DEBUG && println("this is $(current_unit), next is ", token)
-  match_term(identifier, pc, current_unit)
-  return VarAsArgument(token.lexeme, line)
-end
+# function var_as_arg(pc::ParsingContext)
+#   current_unit = "var_as_par"
+#   token, class, line = token_class_line(pc)
+#   DEBUG && println("this is $(current_unit), next is ", token)
+#   match_term(identifier, pc, current_unit)
+#   return VarAsArgument(token.lexeme, line)
+# end
 
 # parse_input(source::String) = parse_input(scan_input(source))

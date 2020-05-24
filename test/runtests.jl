@@ -3,16 +3,17 @@ using MiniPascal
 using Test
 
 const m = MiniPascal
-const prog1 = """
+
+const progs = ["""
 program foo;
 
 begin
   writeln(5 + 2);
 end.
-"""
+""",
 
-const prog2 = """
-program bar;
+"""
+program prog2;
 
 begin
   var a, b : int;
@@ -20,10 +21,10 @@ begin
   b := 42;
   writeln(a + b);
 end.
-"""
+""",
 
-const prog3 = """
-program defs;
+"""
+program prog3;
 
 function doubleit(x:int): int;
   begin
@@ -36,34 +37,34 @@ begin
   b := doubleit(a);
   writeln(b);
 end.
-"""
+""",
 
-const prog4 = """
-program foo;
+"""
+program prog4;
 
 begin
   writeln(101 % 3);
 end.
-"""
+""",
 
-const prog5 = """
-program foo;
+"""
+program prog5;
 
 begin
   writeln(true and false);
 end.
-"""
+""",
 
-const prog6 = """
-program foo;
+"""
+program prog6;
 
 begin
   writeln(not true or not false);
 end.
-"""
+""",
 
-const prog7 = """
-program foo;
+"""
+program prog7;
 
 begin
   var a, b : int;
@@ -71,10 +72,10 @@ begin
   b := 42;
   writeln(a + b);
 end.
-"""
+""",
 
-const prog8 = """
-program defs;
+"""
+program prog8;
 
 function doubleit(x:int): int;
   begin
@@ -87,10 +88,10 @@ begin
   b := doubleit(a);
   writeln(b);
 end.
-"""
+""",
 
-const prog9 = """
-program defs;
+"""
+program prog9;
 
 function double_and_return_orig(var x:int): int;
   begin
@@ -107,10 +108,10 @@ begin
   writeln(a);
   writeln(b);
 end.
-"""
+""",
 
-const prog10 = """
-program foo;
+"""
+program prog10;
 
 begin
   var x: int;
@@ -119,10 +120,10 @@ begin
   then writeln(2*x)
   else writeln(x);
 end.
-"""
+""",
 
-const prog11 = """
-program foo;
+"""
+program prog11;
 
 begin
   var x, y : int;
@@ -138,10 +139,10 @@ begin
     x := x+1;
   end;
 end.
-"""
+""",
 
-const prog12 = """
-program foo;
+"""
+program prog12;
 
 procedure printx();
 begin
@@ -165,10 +166,10 @@ begin
   end;
   printx();
 end.
-"""
+""",
 
-const prog13 = """
-program foo;
+"""
+program prog13;
 
 begin
   var x: real;
@@ -177,19 +178,76 @@ begin
   then writeln(2.0*x)
   else writeln(x);
 end.
+""",
+
 """
+program prog14;
 
-@testset "MiniPascal.jl" begin
-    # Write your own tests here.
-    io = IOBuffer()
-    m.generate(prog13, io)
-    code = String(take!(io))
-    # println(code)
+begin
+  var s,x,y,z: string;
+  x := "Hello";
+  y := "hello";
+  z := ", world!";
+  if x < y
+  then s:=x+z
+  else s:=y+z;
+  writeln(s)
+end.
+""",
 
-    filename = "out.ll"
-    file = open(filename, "w")
-    println(file, code)
-    close(file)
-    run(`lli $(filename)`)
+"""
+program prog15;
 
+function fact(x:int):int;
+begin
+  if (x = 0) or (x = 1)
+    then return 1;
+  return x * fact(x-1);
+end;
+
+begin
+  var x: int;
+  x := 5
+  writeln(fact(x));
+end.
+""",
+
+"""
+program prog16;
+
+begin
+  writeln(-2 + 44);
+end.
+""",
+
+"""
+program prog17;
+function myadd(x:int, y:int):int;
+  begin
+    return x+y;
+  end;
+
+begin
+  var a,b:int
+  var c:boolean
+  writeln(myadd(22,20));
+end.
+""",
+]
+
+# Write your own tests here.
+function run_prog(i::Int)
+  io = IOBuffer()
+  m.generate(progs[i], io)
+  code = String(take!(io))
+  filename = "out.ll"
+  file = open(filename, "w")
+  println(file, code)
+  close(file)
+  run(`lli $(filename)`)
 end
+
+# @testset "MiniPascal.jl" begin
+  run_prog(1)
+# end
+

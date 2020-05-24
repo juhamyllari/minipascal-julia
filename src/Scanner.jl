@@ -57,7 +57,7 @@ end
   kw_int
   kw_real
   kw_string
-  kw_bool
+  kw_boolean
   kw_nothing
   kw_assert
   kw_true
@@ -94,7 +94,7 @@ keywords = Dict([
   "int" => kw_int,
   "real" => kw_real,
   "string" => kw_string,
-  "bool" => kw_bool,
+  "boolean" => kw_boolean,
   "assert" => kw_assert,
   "true" => kw_true,
   "false" => kw_false,
@@ -212,7 +212,7 @@ end
 function getIdentOrKw(input, next, lineNumber)
   initial = next
   while input[next] ∈ ident_or_kw_body next += 1 end
-  str = input[initial:next-1]
+  str = lowercase(input[initial:next-1])
   token = str ∈ keys(keywords) ? Token(keywords[str], str) : Token(identifier, str)
   return token, next
 end
