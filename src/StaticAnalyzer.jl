@@ -457,13 +457,17 @@ function static_analysis(a::Assignment, ac::AnalysisContext)
   a.var_type = var_type
   if var_type ∈ ref_types
     var_type = ref_type_to_scalar_type[var_type]
-  else  # Not a reference type.
+  elseif var_type ∈ scalar_types
     entry.val_identifier = create_var_id(ac, var_type, var_name)
   end
   if value_type != var_type
-    throw(StaticAnalysisException(
-      "Cannot assign a value of type $(value_type) to variable '$(var_name)' of type $(var_type) (line $(a.line))."
-    ))
+    if !(a.is_array_access && scalar_to_array_type[value_type] == var_type)
+      println("This is static analysis of Assignment. Is array access? $(a.is_array_access)")
+      println("This is static analysis of Assignment. Is array access? $(a.is_array_access)")
+      throw(StaticAnalysisException(
+        "Cannot assign a value of type $(value_type) to variable '$(var_name)' of type $(var_type) (line $(a.line))."
+      ))
+    end
   end
   a.var_unique_id = entry.val_identifier
   a.type = MPassed
@@ -563,16 +567,6 @@ function typecheck(v::VariableFactor, ac::AnalysisContext)
   end
   var_entry::SymTableEntry = getvariable(ac, var_name)
   v.variable_entry = var_entry
-  # if !isempty(ac.in_call)
-  #   println("variable $(var_name) was defined in scope $(var_entry.scope_level) ")
-  #   println("call's scope level is $(first(ac.in_call).scope_level) ")
-  #   if var_entry.scope_level < first(ac.in_call).scope_level
-  #     push!(first(ac.in_call).implicit_params, var_entry)
-  #     new_entry = SymTableEntry(var_name, var_entry.var_type, "%$(var_name)", ac.scope)
-  #     v.variable_entry = new_entry
-  #     println("variable_entry was set to $(v.variable_entry)")
-  #   end
-  # end
   var_type = var_entry.var_type
   if var_type ∈ ref_types
     var_type = ref_type_to_scalar_type[var_type]
@@ -588,14 +582,16 @@ function typecheck(a::ArrayAccessFactor, ac::AnalysisContext)
       "Array index should be an integer, got type $(index_type) (line $(a.line))."
     ))
   end
-  var_name = a.identifier.lexeme
+  var_name = a.identifier
   if !hasvariable(ac, var_name)
     throw(StaticAnalysisException(
       "Variable $(var_name) is not defined (line $(a.line))."
     ))
   end
-  var_type = getvariable(ac, var_name).var_type
-  if var_type ∉ [MIntRef, MRealRef, MBoolRef, MStringRef]
+  var_entry::SymTableEntry = getvariable(ac, var_name)
+  a.variable_entry = var_entry
+  var_type = var_entry.var_type
+  if var_type ∉ array_types
     throw(StaticAnalysisException(
       "Cannot index into non-array type ($var_type) variable '$var_name' (line $(a.line))."
     ))

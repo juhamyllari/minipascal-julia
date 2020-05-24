@@ -267,6 +267,38 @@ begin
 end.
 """,
 
+"""
+program prog20;
+
+begin
+  var a: array[3] of boolean;
+  a[0] := true;
+  a[1] := not false;
+  a[2] := true and false;
+  writeln(a[0]);
+  writeln(a[1]);
+  writeln(a[2]);
+end.
+""",
+
+"""
+program prog21;
+
+begin
+  var a: array[3] of int;
+  var i: int;
+  i := 0;
+  while i < 3 do
+    begin
+      a[i] := i*10;
+      i := i+1;
+    end;
+  writeln(a[0]);
+  writeln(a[1]);
+  writeln(a[2]);
+end.
+""",
+
 ]
 
 # Write your own tests here.

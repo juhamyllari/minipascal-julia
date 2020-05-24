@@ -372,11 +372,12 @@ GetRef(operand::VariableFactor, line::Int) = GetRef(operand, line, MUndefined)
 
 mutable struct ArrayAccessFactor <: Factor
   identifier::String
-  index::Expr
+  index::Value
+  variable_entry::Union{SymTableEntry,Nothing}
   line::Int
   type::MPType
 end
-ArrayAccessFactor(identifier, index, line) = ArrayAccessFactor(identifier, index, line, MUndefined)
+ArrayAccessFactor(identifier, index, line) = ArrayAccessFactor(identifier, index, nothing, line, MUndefined)
 
 mutable struct CallFactor <: Factor
   identifier::String

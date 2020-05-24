@@ -394,10 +394,24 @@ function generate(a::Assignment, gc::GenerationContext)
   value_llvm_type = mptype_to_llvm_type[a.value.type]
   value_id = generate(a.value, gc)
   variable_pointer = a.var_unique_id
-  if var_type ∈ keys(ref_type_to_scalar_type)
+  if var_type ∈ ref_types
     ptln(gc, "store $value_llvm_type $value_id, $value_llvm_type* $variable_pointer", 1)
-  else
+  elseif var_type ∈ ref_types
     ptln(gc, "$(a.var_unique_id) = $(get_identity(var_type)) $(value_id)", 1)
+  else  # Array type
+    scalar_type = array_type_to_scalar_type[a.var_type]
+    scalar_llvm_type = mptype_to_llvm_type[scalar_type]
+    array_llvm_type = mptype_to_llvm_type[a.var_type]
+    index_id = generate(a.array_index, gc)
+    arr_ptr_id = create_id(gc, "arr_ptr")
+    cast_array_id = create_id(gc, "cast_array_ptr")
+    ptln(gc, "$cast_array_id = bitcast $array_llvm_type* $variable_pointer to $ARRAY_TYPE_ID*", 1)
+    ptln(gc, "$arr_ptr_id = call i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* $cast_array_id)", 1)
+    backcast_arr_id = create_id(gc, "backcast")
+    ptln(gc, "$backcast_arr_id = bitcast i8* $arr_ptr_id to $scalar_llvm_type*", 1)
+    elem_ptr_id = create_id(gc, "elem_ptr")
+    ptln(gc, "$elem_ptr_id = getelementptr $scalar_llvm_type, $scalar_llvm_type* $backcast_arr_id, i32 $index_id", 1)
+    ptln(gc, "store $scalar_llvm_type $value_id, $scalar_llvm_type* $elem_ptr_id", 1)
   end
 end
 
@@ -543,20 +557,25 @@ function generate(s::SizeFactor, gc::GenerationContext)
 end
 
 function generate(a::ArrayAccessFactor, gc::GenerationContext)
-  variable_entry::SymTableEntry = getvariable(gc, a.identifier.lexeme)
-  val_id = variable_entry.val_identifier
-  scalar_type = ref_type_to_scalar_type[variable_entry.var_type]
+  var_entry::SymTableEntry = a.variable_entry
+  val_id = var_entry.val_identifier
+  scalar_type = array_type_to_scalar_type[var_entry.var_type]
   llvm_type = mptype_to_llvm_type[scalar_type]
+  array_llvm_type = mptype_to_llvm_type[var_entry.var_type]
   index_id = generate(a.index, gc)
   arr_ptr_id = create_id(gc, "arr_ptr")
-  val_ptr_id = create_id(gc, "val_ptr")
   ret_id = create_id(gc, "array_el")
   len_id = create_id(gc, "array_len_ptr")
-  ptln(gc, "$len_id = call i32 $GET_ARRAY_SIZE_ID($ARRAY_TYPE_ID* $val_id)", 1)
-  # TODO: runtime array bounds checking
-  ptln(gc, "$arr_ptr_id = call i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* $val_id)", 1)
-  ptln(gc, "$val_ptr_id = getelementptr $llvm_type, $llvm_type* bitcast (i8* $arr_ptr_id to $llvm_type), i32 0, i32 $index_id", 1)
-  ptln(gc, "$ret_id = load $llvm_type, $llvm_type* $val_ptr_id", 1)
+  cast_array_id = create_id(gc, "cast_array_ptr")
+  ptln(gc, "$cast_array_id = bitcast $array_llvm_type* $val_id to $ARRAY_TYPE_ID*", 1)
+  ptln(gc, "$len_id = call i32 $GET_ARRAY_SIZE_ID($ARRAY_TYPE_ID* $cast_array_id)", 1)
+  ptln(gc, "$arr_ptr_id = call i8* $GET_ARRAY_PTR_ID($ARRAY_TYPE_ID* $cast_array_id)", 1)
+  backcast_arr_id = create_id(gc, "backcast")
+  ptln(gc, "$backcast_arr_id = bitcast i8* $arr_ptr_id to $llvm_type*", 1)
+  elem_ptr_id = create_id(gc, "elem_ptr")
+  ptln(gc, "$elem_ptr_id = getelementptr $llvm_type, $llvm_type* $backcast_arr_id, i32 $index_id", 1)
+  ptln(gc, "$ret_id = load $llvm_type, $llvm_type* $elem_ptr_id", 1)
+  return ret_id
 end
 
 function generate(n::NotFactor, gc::GenerationContext)
