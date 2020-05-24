@@ -233,6 +233,30 @@ begin
   writeln(myadd(22,20));
 end.
 """,
+
+"""
+program prog18;
+function myadddoubleds(x:int, y:int):int;
+  begin
+    return mydouble(x)+mydouble(y);
+  end;
+
+function mydouble(a:real):real;
+  begin
+    return 42.0 {* My favourite double *};
+  end;
+
+function mydouble(a:int):int;
+  begin
+    return a*2;
+  end;
+
+begin
+  var a,b:int
+  var c:boolean
+  writeln(myadddoubleds(22,20));
+end.
+""",
 ]
 
 # Write your own tests here.

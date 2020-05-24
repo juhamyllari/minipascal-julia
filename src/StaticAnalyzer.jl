@@ -205,6 +205,11 @@ static_analysis(AST::Program) = static_analysis(AST, AnalysisContext())
 
 function static_analysis(d::Definitions, ac::AnalysisContext)
   DEBUG && println("This is static analysis, analysing definitions")
+  if !allunique([def.name for def in d.defs])
+    throw(StaticAnalysisException(
+      "All functions and subroutines must have unique names. Overloading is not allowed."
+    ))
+  end
   for subroutine::Subroutine in d.defs
     get_signature(subroutine, ac)
   end
