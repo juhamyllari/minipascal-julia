@@ -1,5 +1,3 @@
-using Parameters
-
 struct LexicalException <: Exception
   msg::String
 end
